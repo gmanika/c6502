@@ -19,14 +19,33 @@
         r (rem byte 16)]
     (str (nth hexchars (rem q 16)) (nth hexchars r))))
 
+(defn tag-byte
+  [cpu addr byte]
+  (if (= (:pc cpu) addr)
+    {:addr addr :byte byte :tag "pc"}
+    {:addr addr :byte byte}))
+
+
+(defn tag-bytes
+  [cpu]
+  (map-indexed #(tag-byte cpu %1 %2) (:memory cpu)))
+
+
+
 (defn format-bytes
   [bytes]
-  (str (string/join " " (map hex bytes))))
+  (apply str (map #(str "<span class='" (:tag %1) "'>" (hex (:byte %1)) "</span>") bytes)))
+
+(defn format-memory-line
+  [bytes]
+  (str (zero-pad (:addr (first bytes))) ":  " (string/join " " (map format-bytes (partition 2 bytes)))))
+
+(format-memory-line [{:byte 1 :tag :pc :addr 0} {:byte 2}  {:byte 3} {:byte 4}])
 
 (defn format-dump
   [cpu]
-  (let [memory (:memory cpu)]
-    (apply str (map-indexed #(str "<pre>" (zero-pad %1) ":  " (format-bytes %2) "</pre>") (partition 8 memory)))))
+  (apply str (map #(str "<pre>" %1 "</pre>") (map format-memory-line (partition 8 (tag-bytes cpu))))))
+
 
 (defn render
   [cpu]
