@@ -8,7 +8,6 @@
                  [hiccup "1.0.4"]]
   :plugins [[lein-cljsbuild "1.0.2"]
             [lein-ring "0.8.7"]]
-  :source-paths ["src-cljs"]
   :cljsbuild {
     :builds [{:id "c6502"
               :source-paths ["src-cljs"]

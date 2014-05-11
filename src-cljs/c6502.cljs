@@ -1,5 +1,6 @@
 (ns c6502
-  (:require [c6502.ui :as ui]))
+  (:require [c6502.ui :as ui])
+  (:use-macros [c6502.macros :only [reverse-eval]]))
 
 ; Status Register bits
 (def N 7) ; sign
@@ -48,6 +49,11 @@
 (defn read-little-endian
   [b1 b2]
   (+ (bit-shift-left b2 8) b1))
+
+
+(defn write-byte
+  [cpu addr byte]
+  (conj cpu {:memory (assoc (:memory cpu) addr byte)}))
 
 
 (defn read-word
@@ -113,28 +119,85 @@
 
 (defmulti opcode (fn [cpu] (nth (:memory cpu) (:pc cpu))))
 
-; LDA Immediate
-(defmethod opcode 0xA9
-  [cpu]
-  (let [load (immediate cpu)]
-    (js/console.log load)
-    (-> cpu
-      (conj {:pc (+ (:pc cpu) (:pc load))
-             :ac (:value load)
-             :cc (+ (:cc cpu) (:cc load))})
-      (set-zero :ac)
-      (set-sign :ac))))
+(defn LDA
+  [cpu load]
+  "LDA Implementation"
+  (-> cpu
+    (conj {:pc (+ (:pc cpu) (:pc load))
+           :ac (:value load)
+           :cc (+ (:cc cpu) (:cc load))})
+    (set-zero :ac)
+    (set-sign :ac)))
 
-; LDA Zero Page
-(defmethod opcode 0xA5
-  [cpu]
-  (let [load (zero-page cpu)]
-    (-> cpu
-      (conj {:pc (+ (:pc cpu) (:pc load))
-             :ac (:value load)
-             :cc (+ (:cc cpu) (:cc load))})
-      (set-zero :ac)
-      (set-sign :ac))))
+(defmethod opcode 0xA9 [cpu]
+  "LDA Immediate"
+  (LDA cpu (immediate cpu)))
+
+(defmethod opcode 0xA5 [cpu]
+  "LDA Zero Page"
+  (LDA cpu (immediate cpu)))
+
+(defmethod opcode 0xB5 [cpu]
+  "LDA Zero Page X"
+  (LDA cpu (zero-page-x cpu)))
+
+(defmethod opcode 0xAD [cpu]
+  "LDA Absolute"
+  (LDA cpu (absolute cpu)))
+
+(defmethod opcode 0xBD [cpu]
+  "LDA Absolute X"
+  (LDA cpu (absolute-x cpu)))
+
+(defmethod opcode 0xB9 [cpu]
+  "LDA Absolute Y"
+  (LDA cpu (absolute-y cpu)))
+
+(defmethod opcode 0xA1 [cpu]
+  "LDA (Indirect X)"
+  (LDA cpu (pre-indexed-indirect cpu)))
+
+(defmethod opcode 0xB1 [cpu]
+  "LDA (Indirect), Y"
+  (LDA cpu (post-indexed-indirect cpu)))
+
+
+(defn STA
+  [cpu load]
+  "STA Implementation"
+  (conj cpu {:pc (+ (:pc cpu) (:pc load))
+             :memory (write-byte cpu (:value load) (:ac cpu))
+             :cc (+ (:cc cpu) (:cc load))}))
+
+(defmethod opcode 0x85 [cpu]
+  "STA Zero Page"
+  (STA cpu (zero-page cpu)))
+
+(defmethod opcode 0x95 [cpu]
+  "STA Zero Page X"
+  (STA cpu (zero-page-x cpu)))
+
+(defmethod opcode 0x80 [cpu]
+  "STA Absolute"
+  (STA cpu (absolute cpu)))
+
+(defmethod opcode 0x90 [cpu]
+  "STA Absolute X"
+  (STA cpu (absolute-x cpu)))
+
+(defmethod opcode 0x99 [cpu]
+  "STA Absolute Y"
+  (STA cpu (absolute-y cpu)))
+
+(defmethod opcode 0x81 [cpu]
+  "STA (Indirect  X)"
+  (STA cpu (pre-indexed-indirect cpu)))
+
+(defmethod opcode 0x91 [cpu]
+  "STA (Indirect) Y"
+  (STA cpu (post-indexed-indirect cpu)))
+
+
 
 
 ; JMP Immediate
@@ -169,7 +232,7 @@
 ; tests
 
 (def test-program
-  [0xA5 0x01 0xE8 0x4C 0x00 0x00]) ; LDA 0x10, INCX, JMP $0x0000
+  [0xA9 0x02 0x85 0x05 0x00 0x00 0xE8 0x4C 0x00 0x00]) ; LDA 0x01, STA 0x00, INCX, JMP $0x0000
 
 (def testCPU (atom (CPU. 0 1 0 0 0 0 0 test-program)))
 
