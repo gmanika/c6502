@@ -40,19 +40,73 @@
     (conj cpu {:sr (bit-set (:sr cpu) N)})
     (conj cpu {:sr (bit-clear (:sr cpu) N)})))
 
+
+(defn read-byte
+  [cpu addr]
+  (nth (:memory cpu) addr))
+
+(defn read-little-endian
+  [b1 b2]
+  (+ (bit-shift-left b2 8) b1))
+
+
+(defn read-word
+  [cpu addr]
+  (read-little-endian (read-byte cpu addr) (read-byte cpu (inc addr))))
+
 ; Addressing modes
 
 (defn immediate
   [cpu]
-  {:value (nth (:memory cpu) (inc (:pc cpu)))
+  {:value (read-byte cpu (inc (:pc cpu)))
    :pc 2
    :cc 2 })
 
 (defn zero-page
+  ([cpu delta]
+    {:value (read-byte cpu (read-byte cpu (+ delta (inc (:pc cpu)))))
+     :pc 2
+     :cc 2})
+  ([cpu]
+    (zero-page cpu 0)))
+
+(defn zero-page-x
   [cpu]
-  {:value (nth (:memory cpu) (nth (:memory cpu) (inc (:pc cpu))))
+  (merge-with + (zero-page cpu (:xr cpu)) {:cc 1}))
+
+
+(defn absolute
+  ([cpu delta]
+    {:value (read-byte cpu (read-word cpu (inc (:pc cpu))))
+     :pc 3
+     :cc 4})
+  ([cpu]
+   (absolute cpu 0)))
+
+
+; FIXME page boundary penalty
+(defn absolute-x
+  [cpu]
+  (absolute cpu (:xr cpu)))
+
+; FIXME page boundary penalty
+(defn absolute-y
+  [cpu]
+  (absolute cpu (:yr cpu)))
+
+(defn pre-indexed-indirect
+  [cpu]
+  {:value (read-byte cpu (to-byte (+ (:value (zero-page cpu)) (:xr cpu))))
    :pc 2
-   :cc 2})
+   :cc 6})
+
+; FIXME page boundary penalty
+(defn post-indexed-indirect
+  [cpu]
+  (let [address (read-little-endian (:value (zero-page cpu)) (:value (zero-page (merge-with + cpu {:pc 1}))))]
+    {:value (read-byte cpu (+ address (:yr cpu)))
+     :pc 2
+     :cc 5}))
 
 
 ; OPCODES
