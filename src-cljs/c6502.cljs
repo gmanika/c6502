@@ -40,6 +40,21 @@
     (conj cpu {:sr (bit-set (:sr cpu) N)})
     (conj cpu {:sr (bit-clear (:sr cpu) N)})))
 
+; Addressing modes
+
+(defn immediate
+  [cpu]
+  {:value (nth (:memory cpu) (inc (:pc cpu)))
+   :pc 2
+   :cc 2 })
+
+(defn zero-page
+  [cpu]
+  {:value (nth (:memory cpu) (nth (:memory cpu) (inc (:pc cpu))))
+   :pc 2
+   :cc 2})
+
+
 ; OPCODES
 
 (defmulti opcode (fn [cpu] (nth (:memory cpu) (:pc cpu))))
@@ -47,12 +62,26 @@
 ; LDA Immediate
 (defmethod opcode 0xA9
   [cpu]
-  (-> cpu
-      (conj {:pc (+ (:pc cpu) 2)
-             :ac (nth (:memory cpu) (inc (:pc cpu)))
-             :cc (+ (:cc cpu) 2)})
+  (let [load (immediate cpu)]
+    (js/console.log load)
+    (-> cpu
+      (conj {:pc (+ (:pc cpu) (:pc load))
+             :ac (:value load)
+             :cc (+ (:cc cpu) (:cc load))})
       (set-zero :ac)
-      (set-sign :ac)))
+      (set-sign :ac))))
+
+; LDA Zero Page
+(defmethod opcode 0xA5
+  [cpu]
+  (let [load (zero-page cpu)]
+    (-> cpu
+      (conj {:pc (+ (:pc cpu) (:pc load))
+             :ac (:value load)
+             :cc (+ (:cc cpu) (:cc load))})
+      (set-zero :ac)
+      (set-sign :ac))))
+
 
 ; JMP Immediate
 (defmethod opcode 0x4C
@@ -67,6 +96,8 @@
   (merge-with + cpu {:pc 1
                      :xr 1
                      :cc 2}))
+
+
 
 (def running-cpu
   (atom (CPU. 0 1 2 3 4 0 0 (reset-memory))))
@@ -84,9 +115,9 @@
 ; tests
 
 (def test-program
-  [0xA9 0x10 0xE8 0x4C 0x00 0x00]) ; LDA 0x10, INCX, JMP $0x0000
+  [0xA5 0x01 0xE8 0x4C 0x00 0x00]) ; LDA 0x10, INCX, JMP $0x0000
 
-(def testCPU (atom (CPU. 0 0 0 0 0 0 0 test-program)))
+(def testCPU (atom (CPU. 0 1 0 0 0 0 0 test-program)))
 
 (swap! testCPU step @testCPU)
 
