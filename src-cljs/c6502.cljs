@@ -43,6 +43,12 @@
     (conj cpu {:sr (bit-set (:sr cpu) N)})
     (conj cpu {:sr (bit-clear (:sr cpu) N)})))
 
+(defn set-overflow
+  [cpu value]
+  (if (> value 255)
+    (conj cpu {:sr (bit-set (:sr cpu) V)})
+    (conj cpu {:sr (bit-clear (:sr cpu) V)})))
+
 
 (defn read-byte
   [cpu addr]
@@ -163,6 +169,20 @@
   (merge-with + cpu {:pc 1
                      :xr 1
                      :cc 2}))
+
+
+(defmethod opcode 0x18 [cpu]
+  "CLC Implementation"
+  (conj cpu (:sr (bit-xor (:sr cpu) C))))
+
+
+(defmethod opcode 0x58 [cpu]
+  "CLI Implementation"
+  (conj cpu (:sr (bit-xor (:sr cpu) I))))
+
+(defmethod opcode 0xB8 [cpu]
+  "CLV Implementation"
+  (conj cpu (set-overflow cpu 0)))
 
 (defn CMP
   [cpu load]
@@ -574,12 +594,37 @@
    [0x94 zero-page-x]
    [0x8C absolute]])
 
-(defmethod opcode 0xAA [cpu]
-  "TAX Implementation"
+(defn move
+  "Implements all register -> register moves"
+  [cpu source destination]
   (-> cpu
       (conj {:pc (inc (:pc cpu))
-             :xr (:ac cpu)}
+             destination (source cpu)}
              :cc (+ (:cc cpu) 2))))
+
+(defmethod opcode 0xAA [cpu]
+  "TAX Implementation"
+  (move cpu :ac :xr))
+
+(defmethod opcode 0xA8 [cpu]
+  "TAY Implementation"
+  (move cpu :ac :yr))
+
+(defmethod opcode 0xBA [cpu]
+  "TSX Implementation"
+  (move cpu :xr :sp))
+
+(defmethod opcode 0x8A [cpu]
+  "TXA Implementation"
+  (move cpu :xr :ac))
+
+(defmethod opcode 0x9A [cpu]
+  "TXS Implementation"
+  (move cpu :xr :sp))
+
+(defmethod opcode 0x9A [cpu]
+  "TYA Implementation"
+  (move cpu :yr ::ac))
 
 
 
