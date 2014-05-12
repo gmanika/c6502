@@ -1,6 +1,8 @@
 (ns c6502
   (:require [c6502.ui :as ui])
-  (:use-macros [c6502.macros :only [reverse-eval]]))
+  (:use-macros [c6502.macros :only [defopcodes]]))
+
+; Documentation: http://nesdev.com/6502.txt
 
 ; Status Register bits
 (def N 7) ; sign
@@ -30,14 +32,14 @@
 ; Status Register handling
 
 (defn set-zero
-  [cpu reg]
-  (if (zero? (reg cpu))
+  [cpu value]
+  (if (zero? value)
     (conj cpu {:sr (bit-set (:sr cpu) Z)})
     (conj cpu {:sr (bit-clear (:sr cpu) Z)})))
 
 (defn set-sign
-  [cpu reg]
-  (if (bit-test (reg cpu) N)
+  [cpu value]
+  (if (neg? value)
     (conj cpu {:sr (bit-set (:sr cpu) N)})
     (conj cpu {:sr (bit-clear (:sr cpu) N)})))
 
@@ -60,17 +62,42 @@
   [cpu addr]
   (read-little-endian (read-byte cpu addr) (read-byte cpu (inc addr))))
 
+(defn push-stack
+  [cpu byte]
+  (conj cpu {:memory (assoc (:memory cpu) (:sp cpu) byte)
+             :sp (inc (:sp cpu))}))
+
+(defn pull-stack
+  [cpu reg]
+  (conj cpu {reg (read-byte cpu (:sp cpu))
+             :sp (dec (:sp cpu))}))
+
+(defn pull-stack-word
+  [cpu reg]
+  (conj cpu {reg (read-word cpu (:sp cpu))
+             :sp (- (:sp cpu) 2)}))
+
+
+
+(defn bit-rotate-right
+  [byte]
+  (to-byte (bit-or (bit-shift-right byte 1) (bit-shift-left byte 7))))
+
+(defn bit-rotate-left
+  [byte]
+  (to-byte (bit-or (bit-shift-left byte 1) (bit-shift-right byte 7))))
+
 ; Addressing modes
 
 (defn immediate
   [cpu]
-  {:value (read-byte cpu (inc (:pc cpu)))
+  {:addr (inc (:pc cpu))
    :pc 2
    :cc 2 })
 
 (defn zero-page
   ([cpu delta]
-    {:value (read-byte cpu (read-byte cpu (+ delta (inc (:pc cpu)))))
+    {:addr (read-byte cpu (+ delta (inc (:pc cpu))))
      :pc 2
      :cc 2})
   ([cpu]
@@ -80,10 +107,13 @@
   [cpu]
   (merge-with + (zero-page cpu (:xr cpu)) {:cc 1}))
 
+(defn zero-page-y
+  [cpu]
+  (merge-with + (zero-page cpu (:yr cpu)) {:cc 1}))
 
 (defn absolute
   ([cpu delta]
-    {:value (read-byte cpu (read-word cpu (inc (:pc cpu))))
+    {:addr (read-word cpu (inc (:pc cpu)))
      :pc 3
      :cc 4})
   ([cpu]
@@ -102,117 +132,454 @@
 
 (defn pre-indexed-indirect
   [cpu]
-  {:value (read-byte cpu (to-byte (+ (:value (zero-page cpu)) (:xr cpu))))
+  {:addr (to-byte (+ (:addr (zero-page cpu))  (:xr cpu)))
    :pc 2
    :cc 6})
 
 ; FIXME page boundary penalty
 (defn post-indexed-indirect
   [cpu]
-  (let [address (read-little-endian (:value (zero-page cpu)) (:value (zero-page (merge-with + cpu {:pc 1}))))]
-    {:value (read-byte cpu (+ address (:yr cpu)))
-     :pc 2
-     :cc 5}))
+  {:addr (+ (read-word cpu (:addr (zero-page cpu))) (:yr cpu))
+   :pc 2
+   :cc 5})
+
+(defn indirect
+  [cpu]
+  {:addr (read-word cpu (:addr (absolute cpu)))
+   :pc 3
+   :cc 5})
 
 
 ; OPCODES
 
 (defmulti opcode (fn [cpu] (nth (:memory cpu) (:pc cpu))))
 
+
+
+
+
+(defmethod opcode 0xE8 [cpu]
+  "INCX"
+  (merge-with + cpu {:pc 1
+                     :xr 1
+                     :cc 2}))
+
+(defn CMP
+  [cpu load]
+  "CMP Implementation"
+  (let [src (- (:ac cpu) (read-byte cpu (:addr load)))]
+    (-> cpu
+        (conj {:pc (+ (:pc cpu) (:pc load))
+               :cc (+ (:cc cpu) (:cc load))})
+        (set-zero src)
+        (set-sign src))))
+
+(defopcodes CMP
+  [[0xC9 immediate]
+   [0xC5 zero-page]
+   [0xD5 zero-page-x]
+   [0xCD absolute]
+   [0xDD absolute-x]
+   [0xD9 absolute-y]
+   [0xC1 pre-indexed-indirect]
+   [0xD1 post-indexed-indirect]])
+
+(defn CMPX
+  [cpu load]
+  "CMPX Implementation"
+  (let [src (- (:xr cpu) (read-byte cpu (:addr load)))]
+    (-> cpu
+        (conj {:pc (+ (:pc cpu) (:pc load))
+               :cc (+ (:cc cpu) (:cc load))})
+        (set-zero src)
+        (set-sign src))))
+
+(defopcodes CMPX
+  [[0xE0 immediate]
+   [0xE4 zero-page]
+   [0xEC absolute]])
+
+(defn CMPY
+  [cpu load]
+  "CMPX Implementation"
+  (let [src (- (:yr cpu) (read-byte cpu (:addr load)))]
+    (-> cpu
+        (conj {:pc (+ (:pc cpu) (:pc load))
+               :cc (+ (:cc cpu) (:cc load))})
+        (set-zero src)
+        (set-sign src))))
+
+(defopcodes CMPY
+  [[0xC0 immediate]
+   [0xC4 zero-page]
+   [0xCC absolute]])
+
+(defn DEC
+  [cpu load]
+  "DEC Implementation"
+  (let [byte (dec (read-byte cpu (:addr load)))]
+    (-> cpu
+        (conj {:pc (+ (:pc cpu) (:pc load))
+               :memory (:memory (write-byte cpu (:addr load) byte))
+               :cc (+ (:cc cpu) (:cc load))})
+        (set-zero byte)
+        (set-sign byte))))
+
+(defopcodes DEC
+  [[0xC6 zero-page]
+   [0xD6 zero-page-x]
+   [0xCE absolute]
+   [0xDE absolute-x]])
+
+(defmethod opcode 0xCA [cpu]
+  "DEX Implementation"
+  (let [src (dec (:xr cpu))]
+    (-> cpu
+      (conj {:pc (inc (:pc cpu))
+             :xr src}
+            (:cc (+ (:cc cpu) 2)))
+      (set-zero src)
+      (set-sign src))))
+
+(defmethod opcode 0x88 [cpu]
+  "DEY Implementation"
+  (let [src (dec (:yr cpu))]
+    (-> cpu
+      (conj {:pc (inc (:pc cpu))
+             :yr src}
+            (:cc (+ (:cc cpu) 2)))
+      (set-zero src)
+      (set-sign src))))
+
+(defn EOR
+  [cpu load]
+  "EOR Implementation"
+  (let [src (bit-xor (:ac cpu)(read-byte cpu (:addr load)))]
+    (-> cpu
+        (conj {:pc (+ (:pc cpu) (:pc load))
+               :ac src
+               :cc (+ (:cc cpu) (:cc load))})
+        (set-zero src)
+        (set-sign src))))
+
+(defopcodes EOR
+  [[0x49 immediate]
+   [0x45 zero-page]
+   [0x55 zero-page-x]
+   [0x40 absolute]
+   [0x50 absolute-x]
+   [0x59 absolute-y]
+   [0x41 pre-indexed-indirect]
+   [0x51 post-indexed-indirect]])
+
+(defn INC
+  [cpu load]
+  "INC Implementation"
+  (let [src (inc (read-byte cpu (:addr load)))]
+    (-> cpu
+        (conj {:pc (+ (:pc cpu) (:pc load))
+               :memory (:memory (write-byte cpu (:addr load) src))
+               :cc (+ (:cc cpu) (:cc load))})
+        (set-zero src)
+        (set-sign src))))
+
+(defopcodes INC
+  [[0xE6 zero-page]
+   [0xF6 zero-page-x]
+   [0xEE absolute]
+   [0xFE absolute-x]])
+
+(defmethod opcode 0xE8 [cpu]
+  "INX"
+  (let [src (inc (:xr cpu))]
+    (-> cpu
+      (conj {:pc (inc (:pc cpu))
+             :xr src
+             :cc (+ (:cc cpu) 2)})
+      (set-zero src)
+      (set-sign src))))
+
+(defmethod opcode 0xC8 [cpu]
+  "INY"
+  (let [src (inc (:yr cpu))]
+    (-> cpu
+      (conj {:pc (inc (:pc cpu))
+             :yr src
+             :cc (+ (:cc cpu) 2)})
+      (set-zero src)
+      (set-sign src))))
+
+(defn JMP
+  [cpu load]
+  "JMP Implementation"
+  (conj cpu {:pc (:addr load)
+             :cc (+ (:cc cpu) (:cc load))}))
+
+(defopcodes JMP
+  [[0x4C absolute]
+   [0x6C indirect]])
+
+(defn JSR
+  [cpu load]
+  "JSR Implementation"
+  (let [return (+ (:pc cpu) (:pc load))]
+    (-> cpu
+        (conj {:pc (:addr load)
+               :cc (+ (:cc cpu) 2)})
+        (push-stack (to-byte return))
+        (push-stack (to-byte (bit-shift-right return 8))))))
+
+(defopcodes JSR
+  [[0x20 absolute]])
+
 (defn LDA
   [cpu load]
   "LDA Implementation"
   (-> cpu
     (conj {:pc (+ (:pc cpu) (:pc load))
-           :ac (:value load)
+           :ac (read-byte cpu (:addr load))
            :cc (+ (:cc cpu) (:cc load))})
-    (set-zero :ac)
-    (set-sign :ac)))
+    (set-zero (:ac cpu))
+    (set-sign (:ac cpu))))
 
-(defmethod opcode 0xA9 [cpu]
-  "LDA Immediate"
-  (LDA cpu (immediate cpu)))
+(defopcodes LDA
+  [[0xA9 immediate]
+   [0xA5 zero-page]
+   [0xB5 zero-page-x]
+   [0xAD absolute]
+   [0xBD absolute-x]
+   [0xB9 absolute-y]
+   [0xA1 pre-indexed-indirect]
+   [0xB1 post-indexed-indirect]])
 
-(defmethod opcode 0xA5 [cpu]
-  "LDA Zero Page"
-  (LDA cpu (immediate cpu)))
 
-(defmethod opcode 0xB5 [cpu]
-  "LDA Zero Page X"
-  (LDA cpu (zero-page-x cpu)))
+(defn LDX
+  [cpu load]
+  "LDX Implementation"
+  (-> cpu
+    (conj {:pc (+ (:pc cpu) (:pc load))
+           :xr (read-byte cpu (:addr load))
+           :cc (+ (:cc cpu) (:cc load))})
+    (set-zero (:xr cpu))
+    (set-sign (:xr cpu))))
 
-(defmethod opcode 0xAD [cpu]
-  "LDA Absolute"
-  (LDA cpu (absolute cpu)))
+(defopcodes LDX
+  [[0xA2 immediate]
+   [0xA6 zero-page]
+   [0xB6 zero-page-y]
+   [0xAE absolute]
+   [0xBE absolute-y]])
 
-(defmethod opcode 0xBD [cpu]
-  "LDA Absolute X"
-  (LDA cpu (absolute-x cpu)))
+(defn LDY
+  [cpu load]
+  "LDY Implementation"
+  (-> cpu
+    (conj {:pc (+ (:pc cpu) (:pc load))
+           :yr (read-byte cpu (:addr load))
+           :cc (+ (:cc cpu) (:cc load))})
+    (set-zero (:yr cpu))
+    (set-sign (:yr cpu))))
 
-(defmethod opcode 0xB9 [cpu]
-  "LDA Absolute Y"
-  (LDA cpu (absolute-y cpu)))
+(defopcodes LDY
+  [[0xA0 immediate]
+   [0xA4 zero-page]
+   [0xB4 zero-page-x]
+   [0xAC absolute]
+   [0xBC absolute-x]])
 
-(defmethod opcode 0xA1 [cpu]
-  "LDA (Indirect X)"
-  (LDA cpu (pre-indexed-indirect cpu)))
+(defn LSR
+  [cpu load]
+  "LSR Implementation"
+  (let [src (bit-shift-right (:addr load) 1)]
+    (-> cpu
+      (conj {:pc (+ (:pc cpu) (:pc load))
+             :memory (:memory (write-byte cpu (:addr load) src))
+             :cc (+ (:cc cpu) (:cc load))})
+      (set-zero src)
+      (set-sign 0))))
 
-(defmethod opcode 0xB1 [cpu]
-  "LDA (Indirect), Y"
-  (LDA cpu (post-indexed-indirect cpu)))
+(defopcodes LSR
+  [[0x46 zero-page]
+   [0x56 zero-page-x]
+   [0x4E absolute]
+   [0x5E absolute-x]])
+
+(defmethod opcode 0x4A [cpu]
+  "LSR A Implementation"
+  (let [src (bit-shift-right (:ac cpu) 1)]
+    (-> cpu
+        (conj {:pc (+ (:pc cpu) 1)}
+              {:ac src}
+              {:cc (+ (:cc cpu) 2)})
+        (set-zero src)
+        (set-sign 0))))
+
+(defmethod opcode 0xEA [cpu]
+  "NOP Implementation"
+  (conj cpu {:pc (inc (:pc cpu))
+             :cc (+ (:cc cpu) 2)}))
+
+(defn ORA
+  [cpu load]
+  "ORA Implementation"
+  (let [src (bit-or (:ac cpu) (read-byte cpu (:addr load)))]
+    (-> cpu
+        (conj {:pc (+ (:pc cpu) (:pc load))
+               :ac src
+               :cc (+ (:cc cpu) (:cc load))})
+        (set-zero src)
+        (set-sign src))))
+
+(defopcodes ORA
+  [[0x09 immediate]
+   [0x05 zero-page]
+   [0x15 zero-page-x]
+   [0x0D absolute]
+   [0x1D absolute-x]
+   [0x19 absolute-y]
+   [0x01 pre-indexed-indirect]
+   [0x11 post-indexed-indirect]])
+
+(defmethod opcode 0x48 [cpu]
+  "PHA Implementation"
+  (-> cpu
+      (conj {:pc (inc (:pc cpu))
+             :cc (+ (:cc cpu) 3)})
+      (push-stack (:ac cpu))))
+
+(defmethod opcode 0x08 [cpu]
+  "PHP Implementation"
+  (-> cpu
+      (conj {:pc (inc (:pc cpu))
+             :cc (+ (:cc cpu) 3)})
+      (push-stack (:sr cpu))))
+
+(defmethod opcode 0x68 [cpu]
+  "PLA Implementation"
+  (-> cpu
+      (conj cpu {:pc (inc (:pc cpu))
+                 :cc (+ (:cc cpu) 4)})
+      (pull-stack :ac)))
+
+(defmethod opcode 0x68 [cpu]
+  "PLA Implementation"
+  (-> cpu
+      (conj cpu {:pc (inc (:pc cpu))
+                 :cc (+ (:cc cpu) 4)})
+      (pull-stack :sp)))
+
+
+
+(defn ROL
+  [cpu load]
+  "ROL Implementation"
+  (let [src (bit-rotate-left (:addr load))]
+    (-> cpu
+      (conj {:pc (+ (:pc cpu) (:pc load))
+             :memory (:memory (write-byte cpu (:addr load) src))
+             :cc (+ (:cc cpu) (:cc load))})
+      (set-zero src)
+      (set-sign 0))))
+
+(defopcodes ROL
+  [[0x26 zero-page]
+   [0x36 zero-page-x]
+   [0x2E absolute]
+   [0x3E absolute-x]])
+
+(defmethod opcode 0x2A [cpu]
+  "ROL A Implementation"
+  (let [src (bit-rotate-left (:ac cpu))]
+    (-> cpu
+        (conj {:pc (+ (:pc cpu) 1)}
+              {:ac src}
+              {:cc (+ (:cc cpu) 2)})
+        (set-zero src)
+        (set-sign 0))))
+
+(defn ROR
+  [cpu load]
+  "ROR Implementation"
+  (let [src (bit-rotate-right (:addr load))]
+    (-> cpu
+      (conj {:pc (+ (:pc cpu) (:pc load))
+             :memory (:memory (write-byte cpu (:addr load) src))
+             :cc (+ (:cc cpu) (:cc load))})
+      (set-zero src)
+      (set-sign 0))))
+
+(defopcodes ROR
+  [[0x66 zero-page]
+   [0x76 zero-page-x]
+   [0x6E absolute]
+   [0x7E absolute-x]])
+
+(defmethod opcode 0x6A [cpu]
+  "ROR A Implementation"
+  (let [src (bit-rotate-right (:ac cpu))]
+    (-> cpu
+        (conj {:pc (+ (:pc cpu) 1)}
+              {:ac src}
+              {:cc (+ (:cc cpu) 2)})
+        (set-zero src)
+        (set-sign 0))))
+
+
+(defmethod opcode 0x60 [cpu]
+  "RTS Implementation"
+  (-> cpu
+      (conj {:cc (+ (:cc cpu) 6)})
+      (pull-stack :sr)
+      (pull-stack-word :pc)))
 
 
 (defn STA
   [cpu load]
   "STA Implementation"
   (conj cpu {:pc (+ (:pc cpu) (:pc load))
-             :memory (write-byte cpu (:value load) (:ac cpu))
+             :memory (:memory (write-byte cpu (:addr load) (:ac cpu)))
              :cc (+ (:cc cpu) (:cc load))}))
 
-(defmethod opcode 0x85 [cpu]
-  "STA Zero Page"
-  (STA cpu (zero-page cpu)))
-
-(defmethod opcode 0x95 [cpu]
-  "STA Zero Page X"
-  (STA cpu (zero-page-x cpu)))
-
-(defmethod opcode 0x80 [cpu]
-  "STA Absolute"
-  (STA cpu (absolute cpu)))
-
-(defmethod opcode 0x90 [cpu]
-  "STA Absolute X"
-  (STA cpu (absolute-x cpu)))
-
-(defmethod opcode 0x99 [cpu]
-  "STA Absolute Y"
-  (STA cpu (absolute-y cpu)))
-
-(defmethod opcode 0x81 [cpu]
-  "STA (Indirect  X)"
-  (STA cpu (pre-indexed-indirect cpu)))
-
-(defmethod opcode 0x91 [cpu]
-  "STA (Indirect) Y"
-  (STA cpu (post-indexed-indirect cpu)))
+(defopcodes STA
+  [[0x85 zero-page]
+   [0x95 zero-page-x]
+   [0x80 absolute]
+   [0x90 absolute-x]
+   [0x99 absolute-y]
+   [0x81 pre-indexed-indirect]
+   [0x91 post-indexed-indirect]])
 
 
+(defn STX
+  [cpu load]
+  "STX Implementation"
+  (conj cpu {:pc (+ (:pc cpu) (:pc load))
+             :memory (:memory (write-byte cpu (:addr load) (:xr cpu)))
+             :cc (+ (:cc cpu) (:cc load))}))
 
+(defopcodes STX
+  [[0x86 zero-page]
+   [0x96 zero-page-y]
+   [0x8E absolute]])
 
-; JMP Immediate
-(defmethod opcode 0x4C
-  [cpu]
-  (conj cpu {:pc (+ (bit-shift-left (nth (:memory cpu) (inc (:pc cpu))) 8)
-                    (nth (:memory cpu) (+ 2 (:pc cpu))))
-             :cc (+ (:cc cpu) 3)}))
+(defn STY
+  [cpu load]
+  "STY Implementation"
+  (conj cpu {:pc (+ (:pc cpu) (:pc load))
+             :memory (:memory (write-byte cpu (:addr load) (:yr cpu)))
+             :cc (+ (:cc cpu) (:cc load))}))
 
-; INCX
-(defmethod opcode 0xE8
-  [cpu]
-  (merge-with + cpu {:pc 1
-                     :xr 1
-                     :cc 2}))
+(defopcodes STY
+  [[0x84 zero-page]
+   [0x94 zero-page-x]
+   [0x8C absolute]])
+
+(defmethod opcode 0xAA [cpu]
+  "TAX Implementation"
+  (-> cpu
+      (conj {:pc (inc (:pc cpu))
+             :xr (:ac cpu)}
+             :cc (+ (:cc cpu) 2))))
 
 
 
@@ -232,11 +599,20 @@
 ; tests
 
 (def test-program
-  [0xA9 0x02 0x85 0x05 0x00 0x00 0xE8 0x4C 0x00 0x00]) ; LDA 0x01, STA 0x00, INCX, JMP $0x0000
+  [0x68 0x004 0x02 0x00 0x00 0x00 0x12 0x00 0x00])
 
-(def testCPU (atom (CPU. 0 1 0 0 0 0 0 test-program)))
+(def testCPU (atom (CPU. 1 5 0 5 0 0 0 test-program)))
 
 (swap! testCPU step @testCPU)
+(def STAtest (CPU. 2 1 0 6 0 0 0 test-program))
+
+(immediate STAtest)
+(post-indexed-indirect STAtest)
+STAtest
+(step STAtest)
+
+(step (step STAtest))
+(zero-page STAtest)
 
 (defn benchmark
   []
@@ -247,7 +623,6 @@
     (js/console.log start)
     (js/console.log (.getTime (js/Date.)))
     (/ (:cc @testCPU) (/ (- (.getTime (js/Date.)) start) 1000))))
-
 
 
 
