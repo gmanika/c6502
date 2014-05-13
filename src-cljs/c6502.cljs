@@ -1,5 +1,6 @@
 (ns c6502
-  (:require [c6502.ui :as ui])
+  (:require [c6502.ui :as ui]
+            [nes])
   (:use-macros [c6502.macros :only [defopcodes]]))
 
 ; Documentation: http://nesdev.com/6502.txt
@@ -636,6 +637,7 @@
   (opcode cpu))
 
 
+
 (defn main
   []
   (c6502.ui/render @running-cpu))
@@ -668,6 +670,4 @@ STAtest
     (js/console.log start)
     (js/console.log (.getTime (js/Date.)))
     (/ (:cc @testCPU) (/ (- (.getTime (js/Date.)) start) 1000))))
-
-
 
