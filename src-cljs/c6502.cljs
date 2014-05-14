@@ -1,6 +1,5 @@
 (ns c6502
-  (:require [c6502.ui :as ui]
-            [nes])
+  (:require [ui])
   (:use-macros [c6502.macros :only [defopcodes]]))
 
 ; Documentation: http://nesdev.com/6502.txt
@@ -638,15 +637,15 @@
 
 
 
-(defn main
-  []
-  (c6502.ui/render @running-cpu))
+;(defn main
+;  []
+;  (c6502.ui/render @running-cpu))
 
 
 ; tests
 
 (def test-program
-  [0x68 0x004 0x02 0x00 0x00 0x00 0x12 0x00 0x00])
+  [0xA8 0x004 0x02 0x00 0x00 0x00 0x12 0x00 0x00])
 
 (def testCPU (atom (CPU. 1 5 0 5 0 0 0 test-program)))
 
@@ -671,3 +670,4 @@ STAtest
     (js/console.log (.getTime (js/Date.)))
     (/ (:cc @testCPU) (/ (- (.getTime (js/Date.)) start) 1000))))
 
+(c6502/opcode {:memory [0xE6 0 0 0 0]})

@@ -1,37 +1,53 @@
 (ns nes
   (:require [c6502]
-            [goog.net.XhrIo :as xhr]))
+            [ui]
+            [goog.net.XhrIo]
+            [goog.net.EventType :as eventtype]))
 
 (def nesROM (atom nil))
 
 (defn nes-loader
   [rom]
-  (vec (concat
-         (repeat 0x8000 0) rom (repeat (- 0xFFFF (count rom) 0x8000) 0))))
+  (vec (concat (repeat 0x0C00 0) (subvec rom 16))))
 
 
 
 (defn receiver [event]
-  (let [response (.-target event)]
-    (js/console.log (.getResponseText response))
-    (compare-and-set! nesROM @nesROM (vec (map (fn [x] (.charCodeAt x 0)) (.getResponseText response))))))
+  (let [response (.-response (.-target event))]
+    (compare-and-set! nesROM @nesROM (array-seq (js/Uint8Array. response)))))
+
 
 (defn rom-loader
   []
-  (goog.net.XhrIo/send "http://zorked.net/nestest.nes" receiver "GET"))
+  (let [req (js/XMLHttpRequest.)]
+    (aset req "onreadystatechange" receiver)
+    (aset req "responseType" "arraybuffer")
+    (.open req "GET" "http://zorked.net/nestest.nes")
+    (.send req)))
+
 
 (rom-loader)
-
-(def NESConsole (c6502/CPU. 0 0 0 0 0x1000 0xC000 0 (nes-loader @nesROM)))
-(c6502/step NESConsole)
-
 @nesROM
-(nth (:memory NESConsole) (+ 0(:pc NESConsole)))
+(subvec @nesROM 16)
 
-(filter #(not (zero? %)) (:memory NESConsole))
-0xC000
-(+ 0xC000 0)
-(filter #(not (zero? (second %)))(map-indexed vector (:memory NESConsole)))
+(def NESConsole (c6502/CPU. 0 0 0 0 0x1000 0x0C00 0 (nes-loader @nesROM)))
 
 
+(:pc NESConsole)
+
+
+(nth (:memory NESConsole) (:pc NESConsole))
+
+(c6502/read-byte NESConsole 0xC00)
+
+
+(c6502/read-byte NESConsole 3072)
+
+(ui/render NESConsole)
+
+(c6502/opcode {:memory [0xE6 0 0 0 0]})
+
+(nth (:memory NESConsole) (:pc NESConsole))
+@nesROM
+(nth (:memory NESConsole) 0xC000)
 

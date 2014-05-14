@@ -9,9 +9,9 @@
   :plugins [[lein-cljsbuild "1.0.2"]
             [lein-ring "0.8.7"]]
   :cljsbuild {
-    :builds [{:id "c6502"
+    :builds [{:id "nes"
               :source-paths ["src-cljs"]
-              :compiler {:output-to "c6502.js"
+              :compiler {:output-to "nes.js"
                          :output-dir "out"
                          :optimizations :none
                          :pretty-print true

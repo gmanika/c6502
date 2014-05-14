@@ -1,4 +1,4 @@
-(ns c6502.ui
+(ns ui
   (:require [clojure.string :as string]))
 
 (def hexchars ["0" "1" "2" "3" "4" "5" "6" "7" "8" "9" "A" "B" "C" "D" "E" "F"])
@@ -38,13 +38,21 @@
 
 (defn format-memory-line
   [bytes]
-  (str (zero-pad (:addr (first bytes))) ":  " (string/join " " (map format-bytes (partition 2 bytes)))))
+  (if (empty? (filter #(not (zero? %)) (map :byte bytes)))
+    "..."
+    (str (zero-pad (:addr (first bytes))) ":  " (string/join " " (map format-bytes (partition 2 bytes))))))
 
 (format-memory-line [{:byte 1 :tag :pc :addr 0} {:byte 2}  {:byte 3} {:byte 4}])
 
+
+
+(filter zero? (map :byte [{:byte 0} {byte 1}]))
+
+(format-memory-line [{:byte 0} {:byte 1}])
+
 (defn format-dump
   [cpu]
-  (apply str (map #(str "<pre>" %1 "</pre>") (map format-memory-line (partition 8 (tag-bytes cpu))))))
+  (apply str (map first (partition-by identity (map #(str "<pre>" (format-memory-line %1) "</pre>")  (partition 16 (tag-bytes cpu)))))))
 
 
 (defn render
