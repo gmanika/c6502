@@ -8,7 +8,7 @@
 
 (defn nes-loader
   [rom]
-  (vec (concat (repeat 0x0C00 0) (subvec rom 16))))
+  (vec (concat (repeat 0xC000 0) (subvec rom 16))))
 
 
 
@@ -30,24 +30,29 @@
 @nesROM
 (subvec @nesROM 16)
 
-(def NESConsole (c6502/CPU. 0 0 0 0 0x1000 0x0C00 0 (nes-loader @nesROM)))
+(def NESConsole (atom (c6502/CPU. 0 0 0 0xFD 0x36 0xC000 0 (nes-loader @nesROM))))
 
 
-(:pc NESConsole)
+(:pc @NESConsole)
+(count (:memory @NESConsole))
 
-
-(nth (:memory NESConsole) (:pc NESConsole))
+(subvec (:memory @NESConsole) (:pc @NESConsole))
 
 (c6502/read-byte NESConsole 0xC00)
-
 
 (c6502/read-byte NESConsole 3072)
 
 (ui/render NESConsole)
 
-(c6502/opcode {:memory [0xE6 0 0 0 0]})
+(js/console.log (dissoc @NESConsole :memory))
+(c6502/step @NESConsole)
 
-(nth (:memory NESConsole) (:pc NESConsole))
+(dissoc (swap! NESConsole c6502/step @NESConsole) :memory)
+
+
+(c6502/step {:memory [0xE6 0 0 0 0]})
+
+(nth (:memory @NESConsole) (:pc @NESConsole))
 @nesROM
 (nth (:memory NESConsole) 0xC000)
 

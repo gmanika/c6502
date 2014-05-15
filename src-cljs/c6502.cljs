@@ -161,9 +161,6 @@
 (defmulti opcode (fn [cpu] (nth (:memory cpu) (:pc cpu))))
 
 
-
-
-
 (defmethod opcode 0xE8 [cpu]
   "INCX"
   (merge-with + cpu {:pc 1
