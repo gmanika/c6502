@@ -4,20 +4,25 @@
 (def hexchars ["0" "1" "2" "3" "4" "5" "6" "7" "8" "9" "A" "B" "C" "D" "E" "F"])
 
 (defn zero-pad
-  [n]
-  (if (< (.-length (str n)) 4)
-    (zero-pad (str "0" n))
-     n))
+  ([n length]
+   (if (< (.-length (str n)) length)
+     (zero-pad (str "0" n) length)
+      n))
+   ([n]
+    (zero-pad n 4)))
+
 
 (defn format-registers
   [cpu & regs]
   (string/join " " (map #(str (name %1) " " (zero-pad (%1 cpu))) regs)))
 
+
 (defn hex
   [byte]
   (let [q (quot byte 16)
         r (rem byte 16)]
-    (str (nth hexchars (rem q 16)) (nth hexchars r))))
+    (str (if (zero? q) "" (hex q))(nth hexchars r))))
+
 
 (defn tag-byte
   [cpu addr byte]
