@@ -639,9 +639,9 @@
   [cpu diff]
   (if (< diff 128)
     (conj cpu {:pc (+ (:pc cpu) diff)
-               :cc (+ (:cc cpu) 3 ) :z 1})
+               :cc (+ (:cc cpu) 3)})
     (conj cpu {:pc (+ (:pc cpu) (- (bit-clear diff 7)))
-               :cc (+ (:cc cpu) 3) :z 4})))
+               :cc (+ (:cc cpu) 3)})))
 
 
 (defmethod opcode 0xB0 [cpu]
@@ -649,7 +649,7 @@
   (if (bit-test (:sr cpu) C)
     (branch cpu (read-byte cpu (inc (:pc cpu))))
     (conj cpu {:pc (+ (:pc cpu) 2)
-               :cc (+ (:cc cpu) 2) :z 2})))
+               :cc (+ (:cc cpu) 2)})))
 
 
 (def running-cpu
