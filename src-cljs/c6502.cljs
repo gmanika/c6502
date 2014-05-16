@@ -95,6 +95,12 @@
 
 ; Addressing modes
 
+(defn implied
+  [cpu]
+  {:addr nil
+   :pc 1
+   :cc 2})
+
 (defn immediate
   [cpu]
   {:addr (inc (:pc cpu))
@@ -549,6 +555,11 @@
       (pull-stack :sr)
       (pull-stack-word :pc)))
 
+(defmethod opcode 0x38 [cpu]
+  "SEC Implementation"
+  (conj cpu {:cc (+ (:cc cpu) 2)
+             :sr (bit-set (:sr cpu) C)
+             :pc (inc (:pc cpu))}))
 
 (defn STA
   [cpu load]
@@ -621,8 +632,24 @@
 
 (defmethod opcode 0x9A [cpu]
   "TYA Implementation"
-  (move cpu :yr ::ac))
+  (move cpu :yr :ac))
 
+(defn branch
+  "Implements branch instructions"
+  [cpu diff]
+  (if (< diff 128)
+    (conj cpu {:pc (+ (:pc cpu) diff)
+               :cc (+ (:cc cpu) 3 ) :z 1})
+    (conj cpu {:pc (+ (:pc cpu) (- (bit-clear diff 7)))
+               :cc (+ (:cc cpu) 3) :z 4})))
+
+
+(defmethod opcode 0xB0 [cpu]
+  "BCS Implementation"
+  (if (bit-test (:sr cpu) C)
+    (branch cpu (read-byte cpu (inc (:pc cpu))))
+    (conj cpu {:pc (+ (:pc cpu) 2)
+               :cc (+ (:cc cpu) 2) :z 2})))
 
 
 (def running-cpu

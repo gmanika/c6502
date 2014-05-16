@@ -47,8 +47,14 @@
 (js/console.log (dissoc @NESConsole :memory))
 (c6502/step @NESConsole)
 
+@NESConsole
+
 (dissoc (swap! NESConsole c6502/step @NESConsole) :memory)
 
+(nth (:memory @NESConsole) 50991)
+
+
+(c6502/step @NESConsole)
 
 (c6502/step {:memory [0xE6 0 0 0 0]})
 
