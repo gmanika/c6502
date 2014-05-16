@@ -17,7 +17,7 @@
 (defn undo
   []
   (swap! history pop)
-  (reset! NESConsole (pop @history)))
+  (reset! NESConsole (peek @history)))
 
 (defn nes-loader
   [rom]
@@ -36,15 +36,24 @@
     (.open req "GET" "http://zorked.net/nestest.nes")
     (.send req)))
 
+(defn show-state
+  [cpu]
+  (map (fn [[k v]] [k (ui/hex v)]) (dissoc cpu :memory)))
 
+
+;; repl
 
 (rom-loader)
+
 @NESConsole
 (c6502/step @NESConsole)
 (swap! NESConsole c6502/step @NESConsole)
-(undo)
 
+(undo)
 (count @history)
+@history
+
+(map show-state @history)
 
 (dissoc (swap! NESConsole c6502/step @NESConsole) :memory)
 
