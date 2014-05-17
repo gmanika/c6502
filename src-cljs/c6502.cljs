@@ -176,16 +176,19 @@
 
 (defmethod opcode 0x18 [cpu]
   "CLC Implementation"
-  (conj cpu (:sr (bit-xor (:sr cpu) C))))
-
+  (conj cpu {:pc (inc (:pc cpu))
+             :sr (bit-clear (:sr cpu) C)}))
 
 (defmethod opcode 0x58 [cpu]
   "CLI Implementation"
-  (conj cpu (:sr (bit-xor (:sr cpu) I))))
+  (conj cpu {:pc (inc (:pc cpu))
+             :sr (bit-clear (:sr cpu) I)}))
 
 (defmethod opcode 0xB8 [cpu]
   "CLV Implementation"
-  (conj cpu (set-overflow cpu 0)))
+  (-> cpu
+      (conj {:pc (inc (:pc cpu))}
+             :sr (bit-clear (:sr cpu) V))))
 
 (defn CMP
   [cpu load]
@@ -571,8 +574,8 @@
 (defopcodes STA
   [[0x85 zero-page]
    [0x95 zero-page-x]
-   [0x80 absolute]
-   [0x90 absolute-x]
+   [0x8D absolute]
+   [0x9D absolute-x]
    [0x99 absolute-y]
    [0x81 pre-indexed-indirect]
    [0x91 post-indexed-indirect]])
@@ -638,10 +641,17 @@
   "Implements branch instructions"
   [cpu diff]
   (if (< diff 128)
-    (conj cpu {:pc (+ (:pc cpu) diff)
+    (conj cpu {:pc (+ (:pc cpu) diff 2)
                :cc (+ (:cc cpu) 3)})
-    (conj cpu {:pc (+ (:pc cpu) (- (bit-clear diff 7)))
+    (conj cpu {:pc (+ (:pc cpu) (- (bit-clear diff 7)) 2)
                :cc (+ (:cc cpu) 3)})))
+
+(defmethod opcode 0x90 [cpu]
+  "BCC Implementation"
+  (if (not (bit-test (:sr cpu) C))
+    (branch cpu (read-byte cpu (inc (:pc cpu))))
+    (conj cpu {:pc (+ (:pc cpu) 2)
+               :cc (+ (:cc cpu) 2)})))
 
 
 (defmethod opcode 0xB0 [cpu]
@@ -650,6 +660,40 @@
     (branch cpu (read-byte cpu (inc (:pc cpu))))
     (conj cpu {:pc (+ (:pc cpu) 2)
                :cc (+ (:cc cpu) 2)})))
+
+(defmethod opcode 0xF0 [cpu]
+  "BEQ Implementation"
+  (if (bit-test (:sr cpu) Z)
+    (branch cpu (read-byte cpu (inc (:pc cpu))))
+    (conj cpu {:pc (+ (:pc cpu) 2)
+               :cc (+ (:cc cpu) 2)})))
+
+(defmethod opcode 0xD0 [cpu]
+  "BNE Implementation"
+  (if (not (bit-test (:sr cpu) Z))
+    (branch cpu (read-byte cpu (inc (:pc cpu))))
+    (conj cpu {:pc (+ (:pc cpu) 2)
+               :cc (+ (:cc cpu) 2)})))
+
+(defn BIT
+  [cpu load]
+  "BIT Implementation"
+  (let [src (read-byte cpu (:addr load))]
+    (-> cpu
+        (conj {:pc (+ (:pc cpu) (:pc load))
+               :cc (+ (:cc cpu) (:cc load))})
+        (set-zero (- src (:ac cpu)))
+        (set-sign src)
+        (set-overflow src))))
+
+
+
+(defopcodes BIT
+  [[0x24 zero-page]
+   [0x2C absolute]])
+
+
+
 
 
 (def running-cpu

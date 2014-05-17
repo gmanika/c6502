@@ -25,7 +25,7 @@
 
 (defn receiver [event]
   (let [response (.-response (.-target event))]
-    (compare-and-set! NESConsole @NESConsole (c6502/CPU. 0 0 0 0xFD 0x36 0xC000 0
+    (compare-and-set! NESConsole @NESConsole (c6502/CPU. 0 0 0 0xFD 0x24 0xC000 0
                                                          (nes-loader (array-seq (js/Uint8Array. response)))))))
 
 (defn rom-loader
@@ -38,22 +38,22 @@
 
 (defn show-state
   [cpu]
-  (map (fn [[k v]] [k (ui/hex v)]) (dissoc cpu :memory)))
+  (map (fn [[k v]] [k (ui/hex v)]) (conj (dissoc cpu :memory) {:next (nth (:memory cpu) (:pc cpu))})))
 
 
 ;; repl
 
 (rom-loader)
 
-@NESConsole
-(c6502/step @NESConsole)
+(show-state @NESConsole)
+(show-state (c6502/step @NESConsole))
 (swap! NESConsole c6502/step @NESConsole)
-
+(map show-state (take-last 5 @history))
 (undo)
 (count @history)
 @history
 
-(map show-state @history)
+
 
 (dissoc (swap! NESConsole c6502/step @NESConsole) :memory)
 
