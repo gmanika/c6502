@@ -37,17 +37,42 @@
     (conj cpu {:sr (bit-set (:sr cpu) Z)})
     (conj cpu {:sr (bit-clear (:sr cpu) Z)})))
 
+(defn set-zero-register
+  [cpu reg]
+  (set-zero cpu (reg cpu)))
+
 (defn set-sign
   [cpu value]
-  (if (neg? value)
+  (if (> value 127)
     (conj cpu {:sr (bit-set (:sr cpu) N)})
     (conj cpu {:sr (bit-clear (:sr cpu) N)})))
 
+(defn set-sign-register
+  [cpu reg]
+  (set-sign cpu (reg cpu)))
+
 (defn set-overflow
   [cpu value]
-  (if (> value 255)
+  (if (bit-test value V)
     (conj cpu {:sr (bit-set (:sr cpu) V)})
     (conj cpu {:sr (bit-clear (:sr cpu) V)})))
+
+(defn set-carry
+  [cpu value]
+  (if (bit-test value 7)
+    (conj cpu {:sr (bit-set (:sr cpu) C)})
+    (conj cpu {:sr (bit-clear (:sr cpu) C)})))
+
+(defn set-carry-cmp
+  [cpu value]
+  (if (> value 0)
+    (conj cpu {:sr (bit-clear (:sr cpu) C)})
+    (conj cpu {:sr (bit-set (:sr cpu) C)})))
+
+(defn clear-b
+  [cpu]
+  (conj cpu {:sr (bit-clear (:sr cpu) B)}))
+
 
 
 (defn read-byte
@@ -70,18 +95,18 @@
 
 (defn push-stack
   [cpu byte]
-  (conj cpu {:memory (assoc (:memory cpu) (:sp cpu) byte)
-             :sp (inc (:sp cpu))}))
+  (conj cpu {:memory (assoc (:memory cpu) (dec (:sp cpu)) byte)
+             :sp (dec (:sp cpu))}))
 
 (defn pull-stack
   [cpu reg]
   (conj cpu {reg (read-byte cpu (:sp cpu))
-             :sp (dec (:sp cpu))}))
+             :sp (inc (:sp cpu))}))
 
 (defn pull-stack-word
   [cpu reg]
   (conj cpu {reg (read-word cpu (:sp cpu))
-             :sp (- (:sp cpu) 2)}))
+             :sp (+ (:sp cpu) 2)}))
 
 
 
@@ -193,12 +218,14 @@
 (defn CMP
   [cpu load]
   "CMP Implementation"
-  (let [src (- (:ac cpu) (read-byte cpu (:addr load)))]
+  (let [src (- (read-byte cpu (:addr load)) (:ac cpu))]
     (-> cpu
         (conj {:pc (+ (:pc cpu) (:pc load))
                :cc (+ (:cc cpu) (:cc load))})
         (set-zero src)
-        (set-sign src))))
+        (set-sign src)
+        (set-carry-cmp src))))
+
 
 (defopcodes CMP
   [[0xC9 immediate]
@@ -292,8 +319,8 @@
   [[0x49 immediate]
    [0x45 zero-page]
    [0x55 zero-page-x]
-   [0x40 absolute]
-   [0x50 absolute-x]
+   [0x4D absolute]
+   [0x5D absolute-x]
    [0x59 absolute-y]
    [0x41 pre-indexed-indirect]
    [0x51 post-indexed-indirect]])
@@ -352,8 +379,8 @@
     (-> cpu
         (conj {:pc (:addr load)
                :cc (+ (:cc cpu) 2)})
-        (push-stack (to-byte return))
-        (push-stack (to-byte (bit-shift-right return 8))))))
+        (push-stack (to-byte (bit-shift-right return 8)))
+        (push-stack (to-byte return)))))
 
 (defopcodes JSR
   [[0x20 absolute]])
@@ -361,12 +388,13 @@
 (defn LDA
   [cpu load]
   "LDA Implementation"
-  (-> cpu
-    (conj {:pc (+ (:pc cpu) (:pc load))
-           :ac (read-byte cpu (:addr load))
-           :cc (+ (:cc cpu) (:cc load))})
-    (set-zero (:ac cpu))
-    (set-sign (:ac cpu))))
+  (let [src (read-byte cpu (:addr load))]
+    (-> cpu
+      (conj {:pc (+ (:pc cpu) (:pc load))
+             :ac src
+             :cc (+ (:cc cpu) (:cc load))})
+      (set-zero src)
+      (set-sign src))))
 
 (defopcodes LDA
   [[0xA9 immediate]
@@ -382,12 +410,13 @@
 (defn LDX
   [cpu load]
   "LDX Implementation"
-  (-> cpu
-    (conj {:pc (+ (:pc cpu) (:pc load))
-           :xr (read-byte cpu (:addr load))
-           :cc (+ (:cc cpu) (:cc load))})
-    (set-zero (:xr cpu))
-    (set-sign (:xr cpu))))
+  (let [src (read-byte cpu (:addr load))]
+    (-> cpu
+      (conj {:pc (+ (:pc cpu) (:pc load))
+             :xr src
+             :cc (+ (:cc cpu) (:cc load))})
+      (set-zero src)
+      (set-sign src))))
 
 (defopcodes LDX
   [[0xA2 immediate]
@@ -395,6 +424,7 @@
    [0xB6 zero-page-y]
    [0xAE absolute]
    [0xBE absolute-y]])
+
 
 (defn LDY
   [cpu load]
@@ -412,6 +442,58 @@
    [0xB4 zero-page-x]
    [0xAC absolute]
    [0xBC absolute-x]])
+
+(defn AND
+  [cpu load]
+  "AND Implementation"
+  (let [src (read-byte cpu (:addr load))]
+    (-> cpu
+        (conj {:pc (+ (:pc cpu) (:pc load))
+               :ac (bit-and (:ac cpu) src)
+               :cc (+ (:cc cpu) (:cc load))})
+        (set-sign-register :ac)
+        (set-zero-register :ac))))
+
+(defopcodes AND
+  [[0x29 immediate]
+   [0x25 zero-page]
+   [0x35 zero-page-x]
+   [0x2D absolute]
+   [0x3D absolute-x]
+   [0x39 absolute-y]
+   [0x21 pre-indexed-indirect]
+   [0x31 post-indexed-indirect]])
+
+(defn ASL
+  [cpu load]
+  "ASL Implementation"
+  (let [src (read-byte cpu (:addr load))
+        shifted (bit-shift-left src 1)]
+    (-> cpu
+      (conj {:pc (+ (:pc cpu) (:pc load))
+             :memory (:memory (write-byte cpu (:addr load) shifted))
+             :cc (+ (:cc cpu) (:cc load))})
+      (set-carry src)
+      (set-zero shifted)
+      (set-sign shifted))))
+
+(defopcodes ASL
+  [[0x06 zero-page]
+   [0x16 zero-page-x]
+   [0x0E absolute]
+   [0x1E absolute-x]])
+
+(defmethod opcode 0x0A [cpu]
+  "ASL A Implementation"
+  (let [src (:ac cpu)
+        shifted (bit-shift-left src 1)]
+    (-> cpu
+      (conj {:pc (inc (:pc cpu))
+             :ac shifted
+             :cc (+ (:cc cpu) 2)})
+      (set-carry src)
+      (set-zero shifted)
+      (set-sign shifted))))
 
 (defn LSR
   [cpu load]
@@ -478,22 +560,25 @@
   (-> cpu
       (conj {:pc (inc (:pc cpu))
              :cc (+ (:cc cpu) 3)})
-      (push-stack (:sr cpu))))
+      ; B bit behavior: http://visual6502.org/wiki/index.php?title=6502_BRK_and_B_bit
+      (push-stack (bit-set (:sr cpu) B))))
 
 (defmethod opcode 0x68 [cpu]
   "PLA Implementation"
   (-> cpu
       (conj cpu {:pc (inc (:pc cpu))
                  :cc (+ (:cc cpu) 4)})
-      (pull-stack :ac)))
+      (pull-stack :ac)
+      (set-zero-register :ac)
+      (set-sign-register :ac)))
 
-(defmethod opcode 0x68 [cpu]
-  "PLA Implementation"
+(defmethod opcode 0x28 [cpu]
+  "PLP Implementation"
   (-> cpu
       (conj cpu {:pc (inc (:pc cpu))
                  :cc (+ (:cc cpu) 4)})
-      (pull-stack :sp)))
-
+      (pull-stack :sr)
+      (clear-b)))
 
 
 (defn ROL
@@ -555,7 +640,6 @@
   "RTS Implementation"
   (-> cpu
       (conj {:cc (+ (:cc cpu) 6)})
-      (pull-stack :sr)
       (pull-stack-word :pc)))
 
 (defmethod opcode 0x38 [cpu]
@@ -563,6 +647,25 @@
   (conj cpu {:cc (+ (:cc cpu) 2)
              :sr (bit-set (:sr cpu) C)
              :pc (inc (:pc cpu))}))
+
+(defmethod opcode 0x78 [cpu]
+  "SEC Implementation"
+  (conj cpu {:cc (+ (:cc cpu) 2)
+             :sr (bit-set (:sr cpu) I)
+             :pc (inc (:pc cpu))}))
+
+(defmethod opcode 0xF8 [cpu]
+  "SEI Implementation"
+  (conj cpu {:cc (inc (:cc cpu))
+             :sr (bit-set (:sr cpu) D)
+             :pc (inc (:pc cpu))}))
+
+(defmethod opcode 0xD8 [cpu]
+  "CLD Implementation"
+  (conj cpu {:cc (inc (:cc cpu))
+             :sr (bit-clear (:sr cpu) D)
+             :pc (inc (:pc cpu))}))
+
 
 (defn STA
   [cpu load]
@@ -675,6 +778,35 @@
     (conj cpu {:pc (+ (:pc cpu) 2)
                :cc (+ (:cc cpu) 2)})))
 
+(defmethod opcode 0x50 [cpu]
+  "BVC Implementation"
+  (if (not (bit-test (:sr cpu) V))
+    (branch cpu (read-byte cpu (inc (:pc cpu))))
+    (conj cpu {:pc (+ (:pc cpu) 2)
+               :cc (+ (:cc cpu) 2)})))
+
+(defmethod opcode 0x70 [cpu]
+  "BVS Implementation"
+  (if (bit-test (:sr cpu) N)
+    (branch cpu (read-byte cpu (inc (:pc cpu))))
+    (conj cpu {:pc (+ (:pc cpu) 2)
+               :cc (+ (:cc cpu) 2)})))
+
+(defmethod opcode 0x30 [cpu]
+  "BMI Implementation"
+  (if (bit-test (:sr cpu) N)
+    (branch cpu (read-byte cpu (inc (:pc cpu))))
+    (conj cpu {:pc (+ (:pc cpu) 2)
+               :cc (+ (:cc cpu) 2)})))
+
+(defmethod opcode 0x10 [cpu]
+  "BPL Implementation"
+  (if (not (bit-test (:sr cpu) N))
+    (branch cpu (read-byte cpu (inc (:pc cpu))))
+    (conj cpu {:pc (+ (:pc cpu) 2)
+               :cc (+ (:cc cpu) 2)})))
+
+
 (defn BIT
   [cpu load]
   "BIT Implementation"
@@ -682,12 +814,12 @@
     (-> cpu
         (conj {:pc (+ (:pc cpu) (:pc load))
                :cc (+ (:cc cpu) (:cc load))})
-        (set-zero (- src (:ac cpu)))
+        (set-zero (bit-and src (:ac cpu)))
         (set-sign src)
         (set-overflow src))))
 
 
-
+(bit-and 0xFF 0x00)
 (defopcodes BIT
   [[0x24 zero-page]
    [0x2C absolute]])

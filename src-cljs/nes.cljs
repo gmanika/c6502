@@ -2,6 +2,7 @@
   (:require [c6502]
             [ui]
             [goog.net.XhrIo]
+            [tests]
             [goog.net.EventType :as eventtype]))
 
 (def NESConsole (atom nil))
@@ -40,21 +41,50 @@
   [cpu]
   (map (fn [[k v]] [k (ui/hex v)]) (conj (dissoc cpu :memory) {:next (nth (:memory cpu) (:pc cpu))})))
 
+(defn simplify
+  [m]
+  {:pc (:pc m) :sr (:sr m) :ac (:ac m) :xr (:xr m) :yr (:yr m) :sp (:sp m)})
+
 
 ;; repl
 
 (rom-loader)
 
+
+(defn run!
+  []
+  (dotimes [n (count tests/nestestlog)]
+    (swap! NESConsole c6502/step @NESConsole)))
+(run!)
+
+
+(map show-state @history)
+
 (show-state @NESConsole)
-(show-state (c6502/step @NESConsole))
-(swap! NESConsole c6502/step @NESConsole)
-(map show-state (take-last 5 @history))
-(undo)
+(show-state (swap! NESConsole c6502/step @NESConsole))
+;(show-state (c6502/step (second @history)))
+
 (count @history)
-@history
+(show-state  (last @history))
+
+(map show-state (take-while #(not (zero? (:pc %))) @history))
+(map simplify (subvec tests/nestestlog 0 (count @history)))
+
+(map show-state
+     (first
+      (filter (fn [[a b]] (not (= (simplify a) (simplify b))))
+        (map vector @history tests/nestestlog))))
+
+
+(map (comp ui/hex :pc) @history)
+(map show-state (filter #(< 0xA9 (:cc %)) @history))
 
 
 
-(dissoc (swap! NESConsole c6502/step @NESConsole) :memory)
+; 26 = 0010 0110
+; A4 = 1010 0110  Z off N on
+
+
+
 
 
