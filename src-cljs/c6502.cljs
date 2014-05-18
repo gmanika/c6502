@@ -7,6 +7,7 @@
 ; Status Register bits
 (def N 7) ; sign
 (def V 6) ; overflow
+(def G 5) ; "ghost"
 (def B 4) ; brk
 (def D 3) ; decimal
 (def I 2) ; interrupt
@@ -43,7 +44,7 @@
 
 (defn set-sign
   [cpu value]
-  (if (> value 127)
+  (if (bit-test value 7)
     (conj cpu {:sr (bit-set (:sr cpu) N)})
     (conj cpu {:sr (bit-clear (:sr cpu) N)})))
 
@@ -57,23 +58,41 @@
     (conj cpu {:sr (bit-set (:sr cpu) V)})
     (conj cpu {:sr (bit-clear (:sr cpu) V)})))
 
+(defn set-overflow-adc
+  [cpu src result]
+  (if (or (= (bit-test result 7) (bit-test (:ac cpu) 7))
+          (= (bit-test result 7) (bit-test src 7)))
+    (conj cpu {:sr (bit-clear (:sr cpu) V)})
+    (conj cpu {:sr (bit-set (:sr cpu) V)})))
+
+(defn set-overflow-sbc
+  [cpu src result]
+  (set-overflow-adc cpu (bit-flip src 7) result))
+
+
+(set-overflow-adc {:ac 127 :sr 1} 127 255)
+(set-overflow-adc {:ac 0 :sr 0} 0x69 0x69)
+
+(bit-test (bit-xor 0x7f 127) 7)
+
+(bit-test (bit-xor 0x7F 0x7F) 7)
+
 (defn set-carry
   [cpu value]
-  (if (bit-test value 7)
+  (if (> value 255)
     (conj cpu {:sr (bit-set (:sr cpu) C)})
     (conj cpu {:sr (bit-clear (:sr cpu) C)})))
 
 (defn set-carry-cmp
   [cpu value]
-  (if (> value 0)
+  (if (< value 0)
     (conj cpu {:sr (bit-clear (:sr cpu) C)})
     (conj cpu {:sr (bit-set (:sr cpu) C)})))
 
-(defn clear-b
+(defn handle-plp
+  "Kludge to handle bits 4 and 5"
   [cpu]
-  (conj cpu {:sr (bit-clear (:sr cpu) B)}))
-
-
+  (conj cpu {:sr (bit-set (bit-clear (:sr cpu) B) G)}))
 
 (defn read-byte
   [cpu addr]
@@ -150,6 +169,7 @@
 
 (defn absolute
   ([cpu delta]
+    (js/console.log "ABSOLUTE" (read-word cpu (inc (:pc cpu))))
     {:addr (read-word cpu (inc (:pc cpu)))
      :pc 3
      :cc 4})
@@ -191,6 +211,55 @@
 
 (defmulti opcode (fn [cpu] (nth (:memory cpu) (:pc cpu))))
 
+(defn ADC
+  [cpu load]
+  "ADC Implementation"
+  (let [src (read-byte cpu (:addr load))
+        result (+ src (:ac cpu) (if (bit-test (:sr cpu) C) 1 0))]
+    (-> cpu
+        (set-overflow-adc src result)
+        (conj {:pc (+ (:pc cpu) (:pc load))
+               :ac (to-byte result)
+               :cc (+ (:cc cpu) (:cc load))})
+        (set-zero (to-byte result))
+        (set-sign (to-byte result))
+        (set-carry result))))
+
+(defopcodes ADC
+  [[0x69 immediate]
+   [0x65 zero-page]
+   [0x75 zero-page-x]
+   [0x60 absolute]
+   [0x70 absolute-x]
+   [0x79 absolute-y]
+   [0x61 pre-indexed-indirect]
+   [0x71 post-indexed-indirect]])
+
+(defn SBC
+  [cpu load]
+  "SBC Implementation"
+  (let [src (read-byte cpu (:addr load))
+        result (- (:ac cpu) src (if (bit-test (:sr cpu) C) 0 1))]
+    (-> cpu
+        (set-overflow-sbc src result)
+        (conj {:pc (+ (:pc cpu) (:pc load))
+               :ac (to-byte result)
+               :cc (+ (:cc cpu) (:cc load))})
+        (set-zero (to-byte result))
+        (set-sign (to-byte result))
+        (set-carry-cmp result))))
+
+(defopcodes SBC
+  [[0xE9 immediate]
+   [0xE5 zero-page]
+   [0xF5 zero-page-x]
+   [0xED absolute]
+   [0xFD absolute-x]
+   [0xF9 absolute-y]
+   [0xE1 pre-indexed-indirect]
+   [0xF1 post-indexed-indirect]])
+
+
 
 (defmethod opcode 0xE8 [cpu]
   "INCX"
@@ -211,14 +280,13 @@
 
 (defmethod opcode 0xB8 [cpu]
   "CLV Implementation"
-  (-> cpu
-      (conj {:pc (inc (:pc cpu))}
-             :sr (bit-clear (:sr cpu) V))))
+  (conj cpu {:pc (inc (:pc cpu))
+             :sr (bit-clear (:sr cpu) V)}))
 
 (defn CMP
   [cpu load]
   "CMP Implementation"
-  (let [src (- (read-byte cpu (:addr load)) (:ac cpu))]
+  (let [src (- (:ac cpu) (read-byte cpu (:addr load)))]
     (-> cpu
         (conj {:pc (+ (:pc cpu) (:pc load))
                :cc (+ (:cc cpu) (:cc load))})
@@ -245,7 +313,8 @@
         (conj {:pc (+ (:pc cpu) (:pc load))
                :cc (+ (:cc cpu) (:cc load))})
         (set-zero src)
-        (set-sign src))))
+        (set-sign src)
+        (set-carry-cmp src))))
 
 (defopcodes CMPX
   [[0xE0 immediate]
@@ -260,7 +329,8 @@
         (conj {:pc (+ (:pc cpu) (:pc load))
                :cc (+ (:cc cpu) (:cc load))})
         (set-zero src)
-        (set-sign src))))
+        (set-sign src)
+        (set-carry-cmp src))))
 
 (defopcodes CMPY
   [[0xC0 immediate]
@@ -286,23 +356,21 @@
 
 (defmethod opcode 0xCA [cpu]
   "DEX Implementation"
-  (let [src (dec (:xr cpu))]
-    (-> cpu
-      (conj {:pc (inc (:pc cpu))
-             :xr src}
-            (:cc (+ (:cc cpu) 2)))
-      (set-zero src)
-      (set-sign src))))
+  (-> cpu
+    (conj {:pc (inc (:pc cpu))
+           :xr (to-byte (dec (:xr cpu)))
+           :cc (+ (:cc cpu) 2)})
+    (set-zero-register :xr)
+    (set-sign-register :xr)))
 
 (defmethod opcode 0x88 [cpu]
   "DEY Implementation"
-  (let [src (dec (:yr cpu))]
-    (-> cpu
-      (conj {:pc (inc (:pc cpu))
-             :yr src}
-            (:cc (+ (:cc cpu) 2)))
-      (set-zero src)
-      (set-sign src))))
+  (-> cpu
+    (conj {:pc (inc (:pc cpu))
+           :yr (to-byte (dec (:yr cpu)))
+           :cc (+ (:cc cpu) 2)})
+    (set-zero-register :yr)
+    (set-sign-register :yr)))
 
 (defn EOR
   [cpu load]
@@ -344,23 +412,21 @@
 
 (defmethod opcode 0xE8 [cpu]
   "INX"
-  (let [src (inc (:xr cpu))]
-    (-> cpu
-      (conj {:pc (inc (:pc cpu))
-             :xr src
-             :cc (+ (:cc cpu) 2)})
-      (set-zero src)
-      (set-sign src))))
+  (-> cpu
+    (conj {:pc (inc (:pc cpu))
+           :xr (to-byte (inc (:xr cpu)))
+           :cc (+ (:cc cpu) 2)})
+    (set-zero-register :xr)
+    (set-sign-register :xr)))
 
 (defmethod opcode 0xC8 [cpu]
   "INY"
-  (let [src (inc (:yr cpu))]
-    (-> cpu
-      (conj {:pc (inc (:pc cpu))
-             :yr src
-             :cc (+ (:cc cpu) 2)})
-      (set-zero src)
-      (set-sign src))))
+  (-> cpu
+    (conj {:pc (inc (:pc cpu))
+           :yr (to-byte (inc (:yr cpu)))
+           :cc (+ (:cc cpu) 2)})
+    (set-zero-register :yr)
+    (set-sign-register :yr)))
 
 (defn JMP
   [cpu load]
@@ -388,6 +454,7 @@
 (defn LDA
   [cpu load]
   "LDA Implementation"
+  (js/console.log (:pc cpu) (:addr load) (read-byte cpu (:addr load)))
   (let [src (read-byte cpu (:addr load))]
     (-> cpu
       (conj {:pc (+ (:pc cpu) (:pc load))
@@ -433,8 +500,8 @@
     (conj {:pc (+ (:pc cpu) (:pc load))
            :yr (read-byte cpu (:addr load))
            :cc (+ (:cc cpu) (:cc load))})
-    (set-zero (:yr cpu))
-    (set-sign (:yr cpu))))
+    (set-zero-register :yr)
+    (set-sign-register :yr)))
 
 (defopcodes LDY
   [[0xA0 immediate]
@@ -467,13 +534,12 @@
 (defn ASL
   [cpu load]
   "ASL Implementation"
-  (let [src (read-byte cpu (:addr load))
-        shifted (bit-shift-left src 1)]
+  (let [shifted (bit-shift-left (read-byte cpu (:addr load)) 1)]
     (-> cpu
       (conj {:pc (+ (:pc cpu) (:pc load))
-             :memory (:memory (write-byte cpu (:addr load) shifted))
+             :memory (:memory (write-byte cpu (:addr load) (to-byte shifted)))
              :cc (+ (:cc cpu) (:cc load))})
-      (set-carry src)
+      (set-carry shifted)
       (set-zero shifted)
       (set-sign shifted))))
 
@@ -485,15 +551,14 @@
 
 (defmethod opcode 0x0A [cpu]
   "ASL A Implementation"
-  (let [src (:ac cpu)
-        shifted (bit-shift-left src 1)]
+  (let [src (bit-shift-left (:ac cpu) 1)]
     (-> cpu
       (conj {:pc (inc (:pc cpu))
-             :ac shifted
+             :ac (to-byte src)
              :cc (+ (:cc cpu) 2)})
       (set-carry src)
-      (set-zero shifted)
-      (set-sign shifted))))
+      (set-zero src)
+      (set-sign src))))
 
 (defn LSR
   [cpu load]
@@ -578,7 +643,7 @@
       (conj cpu {:pc (inc (:pc cpu))
                  :cc (+ (:cc cpu) 4)})
       (pull-stack :sr)
-      (clear-b)))
+      (handle-plp)))
 
 
 (defn ROL
@@ -712,9 +777,11 @@
   "Implements all register -> register moves"
   [cpu source destination]
   (-> cpu
-      (conj {:pc (inc (:pc cpu))
-             destination (source cpu)}
-             :cc (+ (:cc cpu) 2))))
+    (conj cpu {:pc (inc (:pc cpu))
+               destination (source cpu)
+               :cc (+ (:cc cpu) 2)})
+    (set-zero-register destination)
+    (set-sign-register destination)))
 
 (defmethod opcode 0xAA [cpu]
   "TAX Implementation"
@@ -726,7 +793,7 @@
 
 (defmethod opcode 0xBA [cpu]
   "TSX Implementation"
-  (move cpu :xr :sp))
+  (move cpu :sp :xr))
 
 (defmethod opcode 0x8A [cpu]
   "TXA Implementation"
@@ -734,9 +801,12 @@
 
 (defmethod opcode 0x9A [cpu]
   "TXS Implementation"
-  (move cpu :xr :sp))
+  (-> cpu
+    (conj cpu {:pc (inc (:pc cpu))
+               :sp (:xr cpu)
+               :cc (+ (:cc cpu) 2)})))
 
-(defmethod opcode 0x9A [cpu]
+(defmethod opcode 0x98 [cpu]
   "TYA Implementation"
   (move cpu :yr :ac))
 
@@ -787,7 +857,7 @@
 
 (defmethod opcode 0x70 [cpu]
   "BVS Implementation"
-  (if (bit-test (:sr cpu) N)
+  (if (bit-test (:sr cpu) V)
     (branch cpu (read-byte cpu (inc (:pc cpu))))
     (conj cpu {:pc (+ (:pc cpu) 2)
                :cc (+ (:cc cpu) 2)})))
@@ -806,7 +876,6 @@
     (conj cpu {:pc (+ (:pc cpu) 2)
                :cc (+ (:cc cpu) 2)})))
 
-
 (defn BIT
   [cpu load]
   "BIT Implementation"
@@ -818,56 +887,11 @@
         (set-sign src)
         (set-overflow src))))
 
-
-(bit-and 0xFF 0x00)
 (defopcodes BIT
   [[0x24 zero-page]
    [0x2C absolute]])
-
-
-
-
-
-(def running-cpu
-  (atom (CPU. 0 1 2 3 4 0 0 (reset-memory))))
 
 (defn step
   [cpu]
   (opcode cpu))
 
-
-
-;(defn main
-;  []
-;  (c6502.ui/render @running-cpu))
-
-
-; tests
-
-(def test-program
-  [0xA8 0x004 0x02 0x00 0x00 0x00 0x12 0x00 0x00])
-
-(def testCPU (atom (CPU. 1 5 0 5 0 0 0 test-program)))
-
-(swap! testCPU step @testCPU)
-(def STAtest (CPU. 2 1 0 6 0 0 0 test-program))
-
-(immediate STAtest)
-(post-indexed-indirect STAtest)
-STAtest
-(step STAtest)
-
-(step (step STAtest))
-(zero-page STAtest)
-
-(defn benchmark
-  []
-  (let [start (.getTime (js/Date.))]
-    (doall
-      (for [i (range 0 100000)]
-      (swap! testCPU step @testCPU)))
-    (js/console.log start)
-    (js/console.log (.getTime (js/Date.)))
-    (/ (:cc @testCPU) (/ (- (.getTime (js/Date.)) start) 1000))))
-
-(c6502/opcode {:memory [0xE6 0 0 0 0]})

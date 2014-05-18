@@ -39,7 +39,7 @@
 
 (defn show-state
   [cpu]
-  (map (fn [[k v]] [k (ui/hex v)]) (conj (dissoc cpu :memory) {:next (nth (:memory cpu) (:pc cpu))})))
+  (map (fn [[k v]] [k (ui/hex v)]) (dissoc cpu :memory)))
 
 (defn simplify
   [m]
@@ -58,13 +58,19 @@
 (run!)
 
 
+
+
+(last @history)
+
 (map show-state @history)
 
 (show-state @NESConsole)
 (show-state (swap! NESConsole c6502/step @NESConsole))
-;(show-state (c6502/step (second @history)))
 
 (count @history)
+(show-state (last @history))
+
+
 (show-state  (last @history))
 
 (map show-state (take-while #(not (zero? (:pc %))) @history))
@@ -76,8 +82,11 @@
         (map vector @history tests/nestestlog))))
 
 
+; SR =A4
+; SR = E4
+
 (map (comp ui/hex :pc) @history)
-(map show-state (filter #(< 0xA9 (:cc %)) @history))
+(map show-state (take-last 5 (filter #(< (:cc %) 0x305) @history)))
 
 
 
