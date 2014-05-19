@@ -68,9 +68,10 @@
 (show-state (swap! NESConsole c6502/step @NESConsole))
 
 (count @history)
+(count tests/nestestlog)
 (show-state (last @history))
 
-
+(c6502/step (last @history))
 (show-state  (last @history))
 
 (map show-state (take-while #(not (zero? (:pc %))) @history))
@@ -82,11 +83,15 @@
         (map vector @history tests/nestestlog))))
 
 
+;(subvec (:memory z) 0 513)
+
+
+
 ; SR =A4
 ; SR = E4
 
 (map (comp ui/hex :pc) @history)
-(map show-state (take-last 5 (filter #(< (:cc %) 0x305) @history)))
+(map show-state (take-last 5 (filter #(< (:cc %) 0x7F0) @history)))
 
 
 

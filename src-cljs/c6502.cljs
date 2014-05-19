@@ -2,7 +2,8 @@
   (:require [ui])
   (:use-macros [c6502.macros :only [defopcodes]]))
 
-; Documentation: http://nesdev.com/6502.txt
+; Documentation: http://nesdev.com/6502.txt (often wrong)
+;                http://www.6502.org/tutorials/6502opcodes.html
 
 ; Status Register bits
 (def N 7) ; sign
@@ -114,17 +115,22 @@
 
 (defn push-stack
   [cpu byte]
-  (conj cpu {:memory (assoc (:memory cpu) (dec (:sp cpu)) byte)
+  (conj cpu {:memory (assoc (:memory cpu) (+ 0x100 (:sp cpu)) byte)
              :sp (dec (:sp cpu))}))
 
 (defn pull-stack
   [cpu reg]
-  (conj cpu {reg (read-byte cpu (:sp cpu))
+  (conj cpu {reg (read-byte cpu (+ 0x100 (inc (:sp cpu))))
              :sp (inc (:sp cpu))}))
 
-(defn pull-stack-word
-  [cpu reg]
-  (conj cpu {reg (read-word cpu (:sp cpu))
+(defn pull-stack-pc
+  [cpu]
+  (conj cpu {:pc (inc (read-word cpu (+ 0x100 (inc (:sp cpu)))))
+             :sp (+ (:sp cpu) 2)}))
+
+(defn pull-stack-pc-noinc
+  [cpu]
+  (conj cpu {:pc (read-word cpu (+ 0x100 (inc (:sp cpu))))
              :sp (+ (:sp cpu) 2)}))
 
 
@@ -133,9 +139,10 @@
   [byte]
   (to-byte (bit-or (bit-shift-right byte 1) (bit-shift-left byte 7))))
 
+
 (defn bit-rotate-left
   [byte]
-  (to-byte (bit-or (bit-shift-left byte 1) (bit-shift-right byte 7))))
+  (to-byte (bit-or (bit-shift-left byte 1) (bit-shift-right byte 8))))
 
 ; Addressing modes
 
@@ -153,7 +160,7 @@
 
 (defn zero-page
   ([cpu delta]
-    {:addr (read-byte cpu (+ delta (inc (:pc cpu))))
+    {:addr (read-byte cpu (to-byte (+ delta (read-byte cpu (inc (:pc cpu))))))
      :pc 2
      :cc 2})
   ([cpu]
@@ -169,8 +176,7 @@
 
 (defn absolute
   ([cpu delta]
-    (js/console.log "ABSOLUTE" (read-word cpu (inc (:pc cpu))))
-    {:addr (read-word cpu (inc (:pc cpu)))
+    {:addr (bit-and (+ (read-word cpu (inc (:pc cpu))) delta) 0xFFFF)
      :pc 3
      :cc 4})
   ([cpu]
@@ -189,22 +195,32 @@
 
 (defn pre-indexed-indirect
   [cpu]
-  {:addr (to-byte (+ (:addr (zero-page cpu))  (:xr cpu)))
-   :pc 2
-   :cc 6})
+  (let [iaddr (+ (read-byte cpu (inc (:pc cpu))) (:xr cpu))]
+    (js/console.log (:pc cpu) iaddr)
+    {:addr (+ (read-byte cpu (to-byte iaddr)) (bit-shift-left (read-byte cpu (to-byte (inc iaddr))) 8))
+     :pc 2
+     :cc 6}))
 
 ; FIXME page boundary penalty
 (defn post-indexed-indirect
   [cpu]
-  {:addr (+ (read-word cpu (:addr (zero-page cpu))) (:yr cpu))
-   :pc 2
-   :cc 5})
+  (let [addr (read-byte cpu (inc (:pc cpu)))
+        iaddr (+ (read-byte cpu (to-byte addr)) (bit-shift-left (read-byte cpu (to-byte (inc addr))) 8))]
+    {:addr (bit-and (+ iaddr (:yr cpu)) 0xFFFF)
+     :pc 2
+     :cc 5}))
 
 (defn indirect
   [cpu]
-  {:addr (read-word cpu (:addr (absolute cpu)))
-   :pc 3
-   :cc 5})
+  (let [addr (read-word cpu (inc (:pc cpu)))]
+    ; 6502 bug
+    (if (= 0xFF (bit-and addr 0xFF))
+      {:addr (+ (read-byte cpu addr) (bit-shift-left (read-byte cpu (bit-and 0xFF00 addr)) 8))
+       :pc 3
+       :cc 5 }
+      {:addr (read-word cpu (read-word cpu (inc (:pc cpu))))
+       :pc 3
+       :cc 5})))
 
 
 ; OPCODES
@@ -229,8 +245,8 @@
   [[0x69 immediate]
    [0x65 zero-page]
    [0x75 zero-page-x]
-   [0x60 absolute]
-   [0x70 absolute-x]
+   [0x6D absolute]
+   [0x7D absolute-x]
    [0x79 absolute-y]
    [0x61 pre-indexed-indirect]
    [0x71 post-indexed-indirect]])
@@ -340,7 +356,7 @@
 (defn DEC
   [cpu load]
   "DEC Implementation"
-  (let [byte (dec (read-byte cpu (:addr load)))]
+  (let [byte (to-byte (dec (read-byte cpu (:addr load))))]
     (-> cpu
         (conj {:pc (+ (:pc cpu) (:pc load))
                :memory (:memory (write-byte cpu (:addr load) byte))
@@ -396,7 +412,7 @@
 (defn INC
   [cpu load]
   "INC Implementation"
-  (let [src (inc (read-byte cpu (:addr load)))]
+  (let [src (to-byte (inc (read-byte cpu (:addr load))))]
     (-> cpu
         (conj {:pc (+ (:pc cpu) (:pc load))
                :memory (:memory (write-byte cpu (:addr load) src))
@@ -441,7 +457,7 @@
 (defn JSR
   [cpu load]
   "JSR Implementation"
-  (let [return (+ (:pc cpu) (:pc load))]
+  (let [return (+ (:pc cpu) (:pc load) -1)]
     (-> cpu
         (conj {:pc (:addr load)
                :cc (+ (:cc cpu) 2)})
@@ -454,8 +470,8 @@
 (defn LDA
   [cpu load]
   "LDA Implementation"
-  (js/console.log (:pc cpu) (:addr load) (read-byte cpu (:addr load)))
   (let [src (read-byte cpu (:addr load))]
+    (js/console.log "LDA" (:addr load) (read-byte cpu (:addr load)))
     (-> cpu
       (conj {:pc (+ (:pc cpu) (:pc load))
              :ac src
@@ -540,7 +556,7 @@
              :memory (:memory (write-byte cpu (:addr load) (to-byte shifted)))
              :cc (+ (:cc cpu) (:cc load))})
       (set-carry shifted)
-      (set-zero shifted)
+      (set-zero (to-byte shifted))
       (set-sign shifted))))
 
 (defopcodes ASL
@@ -557,19 +573,21 @@
              :ac (to-byte src)
              :cc (+ (:cc cpu) 2)})
       (set-carry src)
-      (set-zero src)
+      (set-zero (to-byte src))
       (set-sign src))))
 
 (defn LSR
   [cpu load]
   "LSR Implementation"
-  (let [src (bit-shift-right (:addr load) 1)]
+  (let [src (read-byte cpu (:addr load))
+        rotated (bit-shift-right src 1)]
     (-> cpu
       (conj {:pc (+ (:pc cpu) (:pc load))
-             :memory (:memory (write-byte cpu (:addr load) src))
+             :memory (:memory (write-byte cpu (:addr load) rotated))
              :cc (+ (:cc cpu) (:cc load))})
-      (set-zero src)
-      (set-sign 0))))
+      (set-carry (bit-and 0x100 (bit-shift-left src 8)))
+      (set-zero rotated)
+      (set-sign rotated))))
 
 (defopcodes LSR
   [[0x46 zero-page]
@@ -579,13 +597,15 @@
 
 (defmethod opcode 0x4A [cpu]
   "LSR A Implementation"
-  (let [src (bit-shift-right (:ac cpu) 1)]
+  (let [src (:ac cpu)
+        rotated (bit-shift-right src 1)]
     (-> cpu
         (conj {:pc (+ (:pc cpu) 1)}
-              {:ac src}
+              {:ac rotated}
               {:cc (+ (:cc cpu) 2)})
-        (set-zero src)
-        (set-sign 0))))
+        (set-carry (bit-and 0x100 (bit-shift-left src 8)))
+        (set-zero-register :ac)
+        (set-sign-register :ac))))
 
 (defmethod opcode 0xEA [cpu]
   "NOP Implementation"
@@ -649,13 +669,16 @@
 (defn ROL
   [cpu load]
   "ROL Implementation"
-  (let [src (bit-rotate-left (:addr load))]
+  (let [src (read-byte cpu (:addr load))
+        rotated (bit-or (if (bit-test (:sr cpu) C) 0x01 0)
+                        (bit-shift-left src 1))]
     (-> cpu
       (conj {:pc (+ (:pc cpu) (:pc load))
-             :memory (:memory (write-byte cpu (:addr load) src))
+             :memory (:memory (write-byte cpu (:addr load) (to-byte rotated)))
              :cc (+ (:cc cpu) (:cc load))})
-      (set-zero src)
-      (set-sign 0))))
+        (set-carry (bit-and rotated 0x100))
+        (set-zero (to-byte rotated))
+        (set-sign (to-byte rotated)))))
 
 (defopcodes ROL
   [[0x26 zero-page]
@@ -665,24 +688,31 @@
 
 (defmethod opcode 0x2A [cpu]
   "ROL A Implementation"
-  (let [src (bit-rotate-left (:ac cpu))]
+  (let [src (:ac cpu)
+        rotated (bit-or (if (bit-test (:sr cpu) C) 0x01 0)
+                        (bit-shift-left src 1))]
     (-> cpu
         (conj {:pc (+ (:pc cpu) 1)}
-              {:ac src}
+              {:ac (to-byte rotated)}
               {:cc (+ (:cc cpu) 2)})
-        (set-zero src)
-        (set-sign 0))))
+        (set-carry (bit-and rotated 0x100))
+        (set-zero (to-byte rotated))
+        (set-sign (to-byte rotated)))))
+
 
 (defn ROR
   [cpu load]
   "ROR Implementation"
-  (let [src (bit-rotate-right (:addr load))]
+  (let [src (read-byte cpu (:addr load))
+        rotated (bit-or (if (bit-test (:sr cpu) C) 0x80 0)
+                         (bit-shift-right src 1))]
     (-> cpu
       (conj {:pc (+ (:pc cpu) (:pc load))
-             :memory (:memory (write-byte cpu (:addr load) src))
+             :memory (:memory (write-byte cpu (:addr load) rotated))
              :cc (+ (:cc cpu) (:cc load))})
-      (set-zero src)
-      (set-sign 0))))
+      (set-carry (bit-and 0x100 (bit-shift-left src 8)))
+      (set-zero rotated)
+      (set-sign rotated))))
 
 (defopcodes ROR
   [[0x66 zero-page]
@@ -692,20 +722,31 @@
 
 (defmethod opcode 0x6A [cpu]
   "ROR A Implementation"
-  (let [src (bit-rotate-right (:ac cpu))]
+  (let [src (:ac cpu)
+        rotated (bit-or (if (bit-test (:sr cpu) C) 0x80 0)
+                         (bit-shift-right src 1))]
     (-> cpu
         (conj {:pc (+ (:pc cpu) 1)}
-              {:ac src}
+              {:ac rotated}
               {:cc (+ (:cc cpu) 2)})
-        (set-zero src)
-        (set-sign 0))))
+        (set-carry (bit-and 0x100 (bit-shift-left src 8)))
+        (set-zero rotated)
+        (set-sign rotated))))
 
 
 (defmethod opcode 0x60 [cpu]
   "RTS Implementation"
   (-> cpu
       (conj {:cc (+ (:cc cpu) 6)})
-      (pull-stack-word :pc)))
+      (pull-stack-pc)))
+
+(defmethod opcode 0x40 [cpu]
+  "RTI Implementation"
+  (-> cpu
+      (conj {:cc (+ (:cc cpu) 6)})
+      (pull-stack :sr)
+      (pull-stack-pc-noinc)
+      (handle-plp)))
 
 (defmethod opcode 0x38 [cpu]
   "SEC Implementation"
