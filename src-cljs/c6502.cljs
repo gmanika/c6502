@@ -160,7 +160,7 @@
 
 (defn zero-page
   ([cpu delta]
-    {:addr (read-byte cpu (to-byte (+ delta (read-byte cpu (inc (:pc cpu))))))
+    {:addr (to-byte (+ delta (read-byte cpu (inc (:pc cpu)))))
      :pc 2
      :cc 2})
   ([cpu]
@@ -196,7 +196,6 @@
 (defn pre-indexed-indirect
   [cpu]
   (let [iaddr (+ (read-byte cpu (inc (:pc cpu))) (:xr cpu))]
-    (js/console.log (:pc cpu) iaddr)
     {:addr (+ (read-byte cpu (to-byte iaddr)) (bit-shift-left (read-byte cpu (to-byte (inc iaddr))) 8))
      :pc 2
      :cc 6}))
@@ -471,7 +470,6 @@
   [cpu load]
   "LDA Implementation"
   (let [src (read-byte cpu (:addr load))]
-    (js/console.log "LDA" (:addr load) (read-byte cpu (:addr load)))
     (-> cpu
       (conj {:pc (+ (:pc cpu) (:pc load))
              :ac src

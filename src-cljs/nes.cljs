@@ -46,59 +46,24 @@
   {:pc (:pc m) :sr (:sr m) :ac (:ac m) :xr (:xr m) :yr (:yr m) :sp (:sp m)})
 
 
-;; repl
-
 (rom-loader)
 
+;; tests
 
 (defn run!
   []
   (dotimes [n (count tests/nestestlog)]
     (swap! NESConsole c6502/step @NESConsole)))
-(run!)
 
+(defn runtest
+  []
+  (run!)
+  (when (= (count @history) 5004)
+    (js/console.log "All tests before illegal opcodes pass!")))
 
-
-
-(last @history)
-
-(map show-state @history)
-
-(show-state @NESConsole)
-(show-state (swap! NESConsole c6502/step @NESConsole))
-
-(count @history)
-(count tests/nestestlog)
-(show-state (last @history))
-
-(c6502/step (last @history))
-(show-state  (last @history))
-
-(map show-state (take-while #(not (zero? (:pc %))) @history))
-(map simplify (subvec tests/nestestlog 0 (count @history)))
-
-(map show-state
-     (first
+(defn comparetests
+  []
+  (map show-state
+    (first
       (filter (fn [[a b]] (not (= (simplify a) (simplify b))))
-        (map vector @history tests/nestestlog))))
-
-
-;(subvec (:memory z) 0 513)
-
-
-
-; SR =A4
-; SR = E4
-
-(map (comp ui/hex :pc) @history)
-(map show-state (take-last 5 (filter #(< (:cc %) 0x7F0) @history)))
-
-
-
-; 26 = 0010 0110
-; A4 = 1010 0110  Z off N on
-
-
-
-
-
+        (map vector @history tests/nestestlog)))))
