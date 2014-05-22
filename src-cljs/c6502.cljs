@@ -1,6 +1,6 @@
 (ns c6502
   (:require [ui])
-  (:use-macros [c6502.macros :only [defopcodes]]))
+  (:use-macros [c6502.macros :only [defopcodes definstruction]]))
 
 ; Documentation: http://nesdev.com/6502.txt (often wrong)
 ;                http://www.6502.org/tutorials/6502opcodes.html
@@ -227,20 +227,18 @@
 (defmulti opcode (fn [cpu] (nth (:memory cpu) (:pc cpu))))
 
 (defn ADC
-  [cpu load]
+  [cpu addr]
   "ADC Implementation"
-  (let [src (read-byte cpu (:addr load))
+  (let [src (read-byte cpu addr)
         result (+ src (:ac cpu) (if (bit-test (:sr cpu) C) 1 0))]
     (-> cpu
         (set-overflow-adc src result)
-        (conj {:pc (+ (:pc cpu) (:pc load))
-               :ac (to-byte result)
-               :cc (+ (:cc cpu) (:cc load))})
+        (assoc :ac (to-byte result))
         (set-zero (to-byte result))
         (set-sign (to-byte result))
         (set-carry result))))
 
-(defopcodes ADC
+(definstruction ADC
   [[0x69 immediate]
    [0x65 zero-page]
    [0x75 zero-page-x]
@@ -250,21 +248,20 @@
    [0x61 pre-indexed-indirect]
    [0x71 post-indexed-indirect]])
 
+
 (defn SBC
-  [cpu load]
+  [cpu addr]
   "SBC Implementation"
-  (let [src (read-byte cpu (:addr load))
+  (let [src (read-byte cpu addr)
         result (- (:ac cpu) src (if (bit-test (:sr cpu) C) 0 1))]
     (-> cpu
         (set-overflow-sbc src result)
-        (conj {:pc (+ (:pc cpu) (:pc load))
-               :ac (to-byte result)
-               :cc (+ (:cc cpu) (:cc load))})
+        (assoc :ac (to-byte result))
         (set-zero (to-byte result))
         (set-sign (to-byte result))
         (set-carry-cmp result))))
 
-(defopcodes SBC
+(definstruction SBC
   [[0xE9 immediate]
    [0xE5 zero-page]
    [0xF5 zero-page-x]
@@ -273,7 +270,6 @@
    [0xF9 absolute-y]
    [0xE1 pre-indexed-indirect]
    [0xF1 post-indexed-indirect]])
-
 
 
 (defmethod opcode 0xE8 [cpu]
@@ -299,18 +295,16 @@
              :sr (bit-clear (:sr cpu) V)}))
 
 (defn CMP
-  [cpu load]
+  [cpu addr]
   "CMP Implementation"
-  (let [src (- (:ac cpu) (read-byte cpu (:addr load)))]
+  (let [src (- (:ac cpu) (read-byte cpu addr))]
     (-> cpu
-        (conj {:pc (+ (:pc cpu) (:pc load))
-               :cc (+ (:cc cpu) (:cc load))})
         (set-zero src)
         (set-sign src)
         (set-carry-cmp src))))
 
 
-(defopcodes CMP
+(definstruction CMP
   [[0xC9 immediate]
    [0xC5 zero-page]
    [0xD5 zero-page-x]
@@ -321,49 +315,43 @@
    [0xD1 post-indexed-indirect]])
 
 (defn CMPX
-  [cpu load]
+  [cpu addr]
   "CMPX Implementation"
-  (let [src (- (:xr cpu) (read-byte cpu (:addr load)))]
+  (let [src (- (:xr cpu) (read-byte cpu addr))]
     (-> cpu
-        (conj {:pc (+ (:pc cpu) (:pc load))
-               :cc (+ (:cc cpu) (:cc load))})
         (set-zero src)
         (set-sign src)
         (set-carry-cmp src))))
 
-(defopcodes CMPX
+(definstruction CMPX
   [[0xE0 immediate]
    [0xE4 zero-page]
    [0xEC absolute]])
 
 (defn CMPY
-  [cpu load]
+  [cpu addr]
   "CMPX Implementation"
-  (let [src (- (:yr cpu) (read-byte cpu (:addr load)))]
+  (let [src (- (:yr cpu) (read-byte cpu addr))]
     (-> cpu
-        (conj {:pc (+ (:pc cpu) (:pc load))
-               :cc (+ (:cc cpu) (:cc load))})
         (set-zero src)
         (set-sign src)
         (set-carry-cmp src))))
 
-(defopcodes CMPY
+(definstruction CMPY
   [[0xC0 immediate]
    [0xC4 zero-page]
    [0xCC absolute]])
 
 (defn DEC
-  [cpu load]
+  [cpu addr]
   "DEC Implementation"
-  (let [byte (to-byte (dec (read-byte cpu (:addr load))))]
+  (let [byte (to-byte (dec (read-byte cpu addr)))]
     (-> cpu
-        (conj {:pc (+ (:pc cpu) (:pc load))
-               :memory (:memory (write-byte cpu (:addr load) byte))
-               :cc (+ (:cc cpu) (:cc load))})
+        (assoc :memory (:memory (write-byte cpu addr byte)))
         (set-zero byte)
         (set-sign byte))))
 
-(defopcodes DEC
+(definstruction DEC
   [[0xC6 zero-page]
    [0xD6 zero-page-x]
    [0xCE absolute]
@@ -388,17 +376,15 @@
     (set-sign-register :yr)))
 
 (defn EOR
-  [cpu load]
+  [cpu addr]
   "EOR Implementation"
-  (let [src (bit-xor (:ac cpu)(read-byte cpu (:addr load)))]
+  (let [src (bit-xor (:ac cpu)(read-byte cpu addr))]
     (-> cpu
-        (conj {:pc (+ (:pc cpu) (:pc load))
-               :ac src
-               :cc (+ (:cc cpu) (:cc load))})
+        (assoc :ac src)
         (set-zero src)
         (set-sign src))))
 
-(defopcodes EOR
+(definstruction EOR
   [[0x49 immediate]
    [0x45 zero-page]
    [0x55 zero-page-x]
@@ -409,17 +395,15 @@
    [0x51 post-indexed-indirect]])
 
 (defn INC
-  [cpu load]
+  [cpu addr]
   "INC Implementation"
-  (let [src (to-byte (inc (read-byte cpu (:addr load))))]
+  (let [src (to-byte (inc (read-byte cpu addr)))]
     (-> cpu
-        (conj {:pc (+ (:pc cpu) (:pc load))
-               :memory (:memory (write-byte cpu (:addr load) src))
-               :cc (+ (:cc cpu) (:cc load))})
+        (assoc :memory (:memory (write-byte cpu addr src)))
         (set-zero src)
         (set-sign src))))
 
-(defopcodes INC
+(definstruction INC
   [[0xE6 zero-page]
    [0xF6 zero-page-x]
    [0xEE absolute]
@@ -467,17 +451,15 @@
   [[0x20 absolute]])
 
 (defn LDA
-  [cpu load]
+  [cpu addr]
   "LDA Implementation"
-  (let [src (read-byte cpu (:addr load))]
+  (let [src (read-byte cpu addr)]
     (-> cpu
-      (conj {:pc (+ (:pc cpu) (:pc load))
-             :ac src
-             :cc (+ (:cc cpu) (:cc load))})
+      (assoc :ac src)
       (set-zero src)
       (set-sign src))))
 
-(defopcodes LDA
+(definstruction LDA
   [[0xA9 immediate]
    [0xA5 zero-page]
    [0xB5 zero-page-x]
@@ -489,17 +471,15 @@
 
 
 (defn LDX
-  [cpu load]
+  [cpu addr]
   "LDX Implementation"
-  (let [src (read-byte cpu (:addr load))]
+  (let [src (read-byte cpu addr)]
     (-> cpu
-      (conj {:pc (+ (:pc cpu) (:pc load))
-             :xr src
-             :cc (+ (:cc cpu) (:cc load))})
+      (assoc :xr src)
       (set-zero src)
       (set-sign src))))
 
-(defopcodes LDX
+(definstruction LDX
   [[0xA2 immediate]
    [0xA6 zero-page]
    [0xB6 zero-page-y]
@@ -508,16 +488,14 @@
 
 
 (defn LDY
-  [cpu load]
+  [cpu addr]
   "LDY Implementation"
   (-> cpu
-    (conj {:pc (+ (:pc cpu) (:pc load))
-           :yr (read-byte cpu (:addr load))
-           :cc (+ (:cc cpu) (:cc load))})
+    (assoc :yr (read-byte cpu addr))
     (set-zero-register :yr)
     (set-sign-register :yr)))
 
-(defopcodes LDY
+(definstruction LDY
   [[0xA0 immediate]
    [0xA4 zero-page]
    [0xB4 zero-page-x]
@@ -525,17 +503,15 @@
    [0xBC absolute-x]])
 
 (defn AND
-  [cpu load]
+  [cpu addr]
   "AND Implementation"
-  (let [src (read-byte cpu (:addr load))]
+  (let [src (read-byte cpu addr)]
     (-> cpu
-        (conj {:pc (+ (:pc cpu) (:pc load))
-               :ac (bit-and (:ac cpu) src)
-               :cc (+ (:cc cpu) (:cc load))})
+        (assoc :ac (bit-and (:ac cpu) src))
         (set-sign-register :ac)
         (set-zero-register :ac))))
 
-(defopcodes AND
+(definstruction AND
   [[0x29 immediate]
    [0x25 zero-page]
    [0x35 zero-page-x]
@@ -546,18 +522,16 @@
    [0x31 post-indexed-indirect]])
 
 (defn ASL
-  [cpu load]
+  [cpu addr]
   "ASL Implementation"
-  (let [shifted (bit-shift-left (read-byte cpu (:addr load)) 1)]
+  (let [shifted (bit-shift-left (read-byte cpu addr) 1)]
     (-> cpu
-      (conj {:pc (+ (:pc cpu) (:pc load))
-             :memory (:memory (write-byte cpu (:addr load) (to-byte shifted)))
-             :cc (+ (:cc cpu) (:cc load))})
+      (assoc :memory (:memory (write-byte cpu addr (to-byte shifted))))
       (set-carry shifted)
       (set-zero (to-byte shifted))
       (set-sign shifted))))
 
-(defopcodes ASL
+(definstruction ASL
   [[0x06 zero-page]
    [0x16 zero-page-x]
    [0x0E absolute]
@@ -575,19 +549,17 @@
       (set-sign src))))
 
 (defn LSR
-  [cpu load]
+  [cpu addr]
   "LSR Implementation"
-  (let [src (read-byte cpu (:addr load))
+  (let [src (read-byte cpu addr)
         rotated (bit-shift-right src 1)]
     (-> cpu
-      (conj {:pc (+ (:pc cpu) (:pc load))
-             :memory (:memory (write-byte cpu (:addr load) rotated))
-             :cc (+ (:cc cpu) (:cc load))})
+      (assoc :memory (:memory (write-byte cpu addr rotated)))
       (set-carry (bit-and 0x100 (bit-shift-left src 8)))
       (set-zero rotated)
       (set-sign rotated))))
 
-(defopcodes LSR
+(definstruction LSR
   [[0x46 zero-page]
    [0x56 zero-page-x]
    [0x4E absolute]
@@ -611,17 +583,15 @@
              :cc (+ (:cc cpu) 2)}))
 
 (defn ORA
-  [cpu load]
+  [cpu addr]
   "ORA Implementation"
-  (let [src (bit-or (:ac cpu) (read-byte cpu (:addr load)))]
+  (let [src (bit-or (:ac cpu) (read-byte cpu addr))]
     (-> cpu
-        (conj {:pc (+ (:pc cpu) (:pc load))
-               :ac src
-               :cc (+ (:cc cpu) (:cc load))})
+        (assoc :ac src)
         (set-zero src)
         (set-sign src))))
 
-(defopcodes ORA
+(definstruction ORA
   [[0x09 immediate]
    [0x05 zero-page]
    [0x15 zero-page-x]
@@ -665,20 +635,18 @@
 
 
 (defn ROL
-  [cpu load]
+  [cpu addr]
   "ROL Implementation"
-  (let [src (read-byte cpu (:addr load))
+  (let [src (read-byte cpu addr)
         rotated (bit-or (if (bit-test (:sr cpu) C) 0x01 0)
                         (bit-shift-left src 1))]
     (-> cpu
-      (conj {:pc (+ (:pc cpu) (:pc load))
-             :memory (:memory (write-byte cpu (:addr load) (to-byte rotated)))
-             :cc (+ (:cc cpu) (:cc load))})
-        (set-carry (bit-and rotated 0x100))
-        (set-zero (to-byte rotated))
-        (set-sign (to-byte rotated)))))
+      (assoc :memory (:memory (write-byte cpu addr (to-byte rotated))))
+      (set-carry (bit-and rotated 0x100))
+      (set-zero (to-byte rotated))
+      (set-sign (to-byte rotated)))))
 
-(defopcodes ROL
+(definstruction ROL
   [[0x26 zero-page]
    [0x36 zero-page-x]
    [0x2E absolute]
@@ -699,20 +667,18 @@
 
 
 (defn ROR
-  [cpu load]
+  [cpu addr]
   "ROR Implementation"
-  (let [src (read-byte cpu (:addr load))
+  (let [src (read-byte cpu addr)
         rotated (bit-or (if (bit-test (:sr cpu) C) 0x80 0)
                          (bit-shift-right src 1))]
     (-> cpu
-      (conj {:pc (+ (:pc cpu) (:pc load))
-             :memory (:memory (write-byte cpu (:addr load) rotated))
-             :cc (+ (:cc cpu) (:cc load))})
+      (assoc :memory (:memory (write-byte cpu addr rotated)))
       (set-carry (bit-and 0x100 (bit-shift-left src 8)))
       (set-zero rotated)
       (set-sign rotated))))
 
-(defopcodes ROR
+(definstruction ROR
   [[0x66 zero-page]
    [0x76 zero-page-x]
    [0x6E absolute]
@@ -772,13 +738,11 @@
 
 
 (defn STA
-  [cpu load]
+  [cpu addr]
   "STA Implementation"
-  (conj cpu {:pc (+ (:pc cpu) (:pc load))
-             :memory (:memory (write-byte cpu (:addr load) (:ac cpu)))
-             :cc (+ (:cc cpu) (:cc load))}))
+  (assoc cpu :memory (:memory (write-byte cpu addr (:ac cpu)))))
 
-(defopcodes STA
+(definstruction STA
   [[0x85 zero-page]
    [0x95 zero-page-x]
    [0x8D absolute]
@@ -789,25 +753,21 @@
 
 
 (defn STX
-  [cpu load]
+  [cpu addr]
   "STX Implementation"
-  (conj cpu {:pc (+ (:pc cpu) (:pc load))
-             :memory (:memory (write-byte cpu (:addr load) (:xr cpu)))
-             :cc (+ (:cc cpu) (:cc load))}))
+  (assoc cpu :memory (:memory (write-byte cpu addr (:xr cpu)))))
 
-(defopcodes STX
+(definstruction STX
   [[0x86 zero-page]
    [0x96 zero-page-y]
    [0x8E absolute]])
 
 (defn STY
-  [cpu load]
+  [cpu addr]
   "STY Implementation"
-  (conj cpu {:pc (+ (:pc cpu) (:pc load))
-             :memory (:memory (write-byte cpu (:addr load) (:yr cpu)))
-             :cc (+ (:cc cpu) (:cc load))}))
+  (assoc cpu :memory (:memory (write-byte cpu addr (:yr cpu)))))
 
-(defopcodes STY
+(definstruction STY
   [[0x84 zero-page]
    [0x94 zero-page-x]
    [0x8C absolute]])
@@ -916,17 +876,15 @@
                :cc (+ (:cc cpu) 2)})))
 
 (defn BIT
-  [cpu load]
+  [cpu addr]
   "BIT Implementation"
-  (let [src (read-byte cpu (:addr load))]
+  (let [src (read-byte cpu addr)]
     (-> cpu
-        (conj {:pc (+ (:pc cpu) (:pc load))
-               :cc (+ (:cc cpu) (:cc load))})
         (set-zero (bit-and src (:ac cpu)))
         (set-sign src)
         (set-overflow src))))
 
-(defopcodes BIT
+(definstruction BIT
   [[0x24 zero-page]
    [0x2C absolute]])
 

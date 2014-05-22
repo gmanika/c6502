@@ -67,3 +67,4 @@
     (first
       (filter (fn [[a b]] (not (= (simplify a) (simplify b))))
         (map vector @history tests/nestestlog)))))
+
